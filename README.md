@@ -146,3 +146,18 @@ python -X utf8 scripts/gold_set.py validate --gold-dir data/gold_sets/aao_pdf_pa
 ```
 
 操作步骤、日期角色和不确定标记见 [人工核验指南](docs/gold_set_review.md)；抽样方法、评分定义、冻结/版本比较命令见 [评估规范](docs/gold_set_evaluation.md)。实际抽样覆盖与局限见 [抽样报告](reports/gold_set_sampling_2026-09-25.md)。
+
+## AAOCA 相关性例外病例复核
+
+当前队列已经由医院筛查，真实文本扫描显示绝大多数患者都有多处 AAOCA/冠状动脉起源异常诊疗证据。因此本阶段不要求人工重复标注全队列，只输出资料缺失、证据稀疏、始终为疑似、解剖描述冲突，或 ALCAPA/ARCAPA、单支冠脉、复杂先心病等范围边界病例：
+
+```powershell
+python -X utf8 scripts/aaoca_exception_review.py build `
+  --run data/derived/v0.1_full `
+  --output data/review/aaoca_exception_review_v1
+
+python -X utf8 scripts/aaoca_exception_review.py validate `
+  --output data/review/aaoca_exception_review_v1
+```
+
+`data/review/aaoca_exception_review_v1/exception_cases.csv` 和 `exception_evidence.csv` **只包含例外患者**；普通高证据病例不会混入人工交付物。人工只编辑 `review_status`、`final_aaoca_judgment` 和 `reviewer_notes`。若先怀疑并做过针对性检查、后来排除 AAOCA，仍应标记为 `yes`。完整判定定义、reason code、兼容约定和最终完整性验证见 [AAOCA 例外病例复核说明](docs/aaoca_exception_review.md)。该目录包含姓名和院内编号，仅限受限本地使用并由 `.gitignore` 排除。
