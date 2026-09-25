@@ -125,4 +125,4 @@ python -X utf8 scripts/aaoca_management.py validate `
 - 同一患者跨住院阶段的意向、取消、随访和手术时序；
 - `unknown` 中只有诊断性造影、资料不完整或尚处诊疗过程的病例。
 
-LLM 阶段必须作为独立 sidecar 工作流，引用本 contract 中已有的 section/evidence ID，并通过结构验证；不能静默覆盖 deterministic 结果，也不能在未经单独授权时把病例内容发送到外部服务。
+LLM 阶段必须作为独立 sidecar 工作流，引用本 contract 中已有的 section/evidence ID，并通过结构验证；不能静默覆盖 deterministic 结果，也不能在未经单独授权时把病例内容发送到外部服务。已实现的 provider-neutral 原型、运行命令和接入约束见 `docs/aaoca_management_llm.md`。
