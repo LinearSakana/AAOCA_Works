@@ -302,7 +302,8 @@ def evaluate(gold_dir: Path, revision: str, output: Path) -> dict:
         raise ValueError(f"Pipeline output lacks {len(missing)} sampled source PDFs")
     cache = {}
     all_counts, failures, unit_scores = Counter(), [], []
-    by_source = defaultdict(Counter)
+    by_baseline_source = defaultdict(Counter)
+    by_evaluated_source = defaultdict(Counter)
     by_type = defaultdict(Counter)
     for unit in manifest["units"]:
         sha = unit["source_sha256"]
@@ -322,12 +323,15 @@ def evaluate(gold_dir: Path, revision: str, output: Path) -> dict:
         annotation = annotations[unit["unit_id"]]
         if annotation["status"] == "unreviewable":
             all_counts["pages_unreviewable"] += 1
-            by_source[unit["stratum"].split("_")[0]]["pages_unreviewable"] += 1
+            by_baseline_source[unit["stratum"].split("_")[0]]["pages_unreviewable"] += 1
             unit_scores.append({"unit_id": unit["unit_id"], "scored": False, "reason": "unreviewable"})
             continue
         counts, page_failures, score = _score_unit(unit, annotation, page, predictions)
         all_counts.update(counts)
-        by_source[unit["stratum"].split("_")[0]].update(counts)
+        by_baseline_source[unit["stratum"].split("_")[0]].update(counts)
+        evaluated_source = "ocr" if page.get("analysis_text_source") == "local_ocr" else "native"
+        by_evaluated_source[evaluated_source].update(counts)
+        score["evaluated_text_source"] = evaluated_source
         for kind, stats in score["type_stats"].items():
             by_type[kind].update(stats)
         for failure in page_failures:
@@ -342,7 +346,9 @@ def evaluate(gold_dir: Path, revision: str, output: Path) -> dict:
             "pipeline": {"version": metadata["pipeline_version"], "run_id": metadata["run_id"],
                          "code_sha256": metadata["code_sha256"],
                          "run_metadata_sha256": hashlib.sha256((output / "run_metadata.json").read_bytes()).hexdigest()},
-            "metrics": _metrics(all_counts), "by_text_source": {k: _metrics(v) for k, v in sorted(by_source.items())},
+            "metrics": _metrics(all_counts),
+            "by_baseline_text_source": {k: _metrics(v) for k, v in sorted(by_baseline_source.items())},
+            "by_evaluated_text_source": {k: _metrics(v) for k, v in sorted(by_evaluated_source.items())},
             "by_gold_type": {k: {**dict(sorted(v.items())),
                                  "section_match_recall": _ratio(v["matched_sections"], v["gold_sections"]),
                                  "type_accuracy_matched": _ratio(v["type_correct"], v["type_evaluable"]),

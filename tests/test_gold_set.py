@@ -5,6 +5,7 @@ import csv
 from itertools import product
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 
@@ -125,6 +126,40 @@ class GoldSetTests(unittest.TestCase):
         self.assertEqual(first["metrics"]["date_value_accuracy_known"], 0.666667)
         second = evaluate(self.gold, "r1", self.output)
         self.assertEqual(compare(first, second)["delta_right_minus_left"]["text_cer"], 0)
+        # A revised parser may renumber every document; source SHA + page still
+        # points to exactly the same four gold pages.
+        revised = self.root / "run_b"
+        shutil.copytree(self.output, revised)
+        new_metadata = json.loads((revised / "run_metadata.json").read_text(encoding="utf-8"))
+        new_metadata.update(run_id="synthetic_b", pipeline_version="0.2.0", code_sha256={"structure.py": "def"})
+        write_json(revised / "run_metadata.json", new_metadata)
+        changed_docs = []
+        with (revised / "document_index.csv").open(encoding="utf-8-sig", newline="") as stream:
+            source_docs = list(csv.DictReader(stream))
+        for document in source_docs:
+            old_id = document["document_id"]
+            new_id = "new_" + old_id
+            shutil.copy2(revised / "normalized" / f"{old_id}.json", revised / "normalized" / f"{new_id}.json")
+            payload = json.loads((revised / "sections" / f"{old_id}.json").read_text(encoding="utf-8"))
+            if old_id == "doc_1":
+                payload["sections"] = [
+                    {"section_id": "new_s1", "page_spans": [{"page": 1, "start_line": 1, "end_line": 1}],
+                     "section_type": "progress", "section_subtype": "", "section_date": "", "date_source": "", "date_uncertain": False},
+                    {"section_id": "new_s2", "page_spans": [{"page": 1, "start_line": 2, "end_line": 2}],
+                     "section_type": "procedure", "section_subtype": "", "section_date": "", "date_source": "", "date_uncertain": False}]
+            if old_id == "doc_2":
+                payload["sections"][0]["section_date"] = "2024-01-02"
+            write_json(revised / "sections" / f"{new_id}.json", payload)
+            document.update(document_id=new_id, text_path=f"normalized/{new_id}.txt",
+                            sections_path=f"sections/{new_id}.json")
+            changed_docs.append(document)
+        csv_file(revised / "document_index.csv", changed_docs)
+        improved = evaluate(self.gold, "r1", revised)
+        comparison = compare(first, improved)
+        self.assertEqual(improved["metrics"]["section_match_recall"], 1)
+        self.assertEqual(improved["metrics"]["date_value_accuracy_known"], 1)
+        self.assertGreater(comparison["delta_right_minus_left"]["section_match_recall"], 0)
+        self.assertTrue(any(key[2] == "date_confused_with_print" for key in comparison["resolved_failure_keys"]))
         second["annotation_digest"] = "wrong"
         with self.assertRaises(ValueError):
             compare(first, second)
@@ -149,6 +184,36 @@ class GoldSetTests(unittest.TestCase):
         seeded = _seed(unit, {"normalized_text": "A\nB"}, [{"start_line": 1, "end_line": 2,
                    "section_type": "progress", "section_subtype": "", "section_date": "", "date_source": ""}], "sample")
         self.assertEqual(seeded["status"], "draft")
+
+    def test_uncertainty_excludes_only_the_affected_scores(self):
+        self.make_output()
+        self.manifest = sample(self.output, self.gold, pages_per_stratum=1, seed=7)
+        for unit in self.manifest["units"]:
+            index = int(unit["baseline_document_id"].split("_")[1])
+            text = "A\nB" if index == 1 else "报告\n2024-01-02"
+            kind = "progress" if index == 1 else "laboratory" if index in (2, 4) else "admission"
+            annotation = self.annotation(unit, text, [self.section(1, 2, kind)])
+            if index == 1:
+                annotation["text"]["status"] = "uncertain"
+                annotation["notes"] = "synthetic unreadable print"
+            elif index == 2:
+                annotation["status"] = "unreviewable"
+                annotation["notes"] = "synthetic damaged source"
+            elif index == 3:
+                annotation["sections"][0]["type"] = {"status": "uncertain", "value": ""}
+                annotation["sections"][0]["subtype"] = {"status": "schema_gap", "value": ""}
+                annotation["sections"][0]["date"] = {"status": "uncertain", "value": "", "role": "other", "other_dates": []}
+            self.assertEqual(validate_annotation(annotation, unit, self.manifest["sample_id"]), [])
+            write_json(self.gold / "annotations" / f"{unit['unit_id']}.json", annotation)
+        freeze(self.gold, "r1")
+        report = evaluate(self.gold, "r1", self.output)
+        counts = report["metrics"]["counts"]
+        self.assertEqual(counts["pages_unreviewable"], 1)
+        self.assertEqual(counts["text_excluded_uncertain"], 1)
+        self.assertEqual(counts["type_excluded_uncertain"], 1)
+        self.assertEqual(counts["subtype_excluded_schema_gap"], 1)
+        self.assertEqual(counts["date_excluded_uncertain"], 1)
+        self.assertEqual(report["metrics"]["text_pages"], 2)
 
 
 if __name__ == "__main__":

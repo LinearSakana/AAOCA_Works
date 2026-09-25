@@ -28,7 +28,7 @@ python -X utf8 scripts/gold_set.py sample --run data/derived/v0.1_full --gold-di
 
 `date_value_accuracy_matched` 的分母为已匹配且人工日期是 `known` 或 `absent` 的段；`known` 要求 `YYYY-MM-DD` 完全相同，`absent` 要求预测值为空。另报 `date_value_accuracy_known`，避免大量无日期段提高表面准确率。`date_assertion_rate_known` 是人工已知日期中 pipeline 输出非空且未标 `date_uncertain` 的比例。`date_value_and_role_accuracy_known` 要求日期值与语义都正确；目前仅能从 `date_source` 区分 `test_timestamp_column → test` 与标题/显式文书字段 → `document`，其余角色返回 `unknown`，所以此项也暴露当前 schema 的限制。时间精度（小时分钟）目前**未评分**，仅评分日。
 
-每个比率都在报告的 `counts` 中保留分子/分母；分母为零输出 null。`by_text_source` 分开统计 native/OCR；`by_gold_type` 保留每种人工 type 的样本数、匹配率、分类与日期正确率以及错误模式计数。逐例 `failures` 用匿名页代号、页码、人工 type、指标、错误模式、影响级别和预测值定位错误；不写原文。日期预测等仍属受限临床信息，评估 JSON 保存在 `data/`。`date_confused_with_print/historical/planned_procedure/...` 只有在人工明确标注的其他日期与错误预测值相同时才赋予，不能凭程序猜原因。
+每个比率都在报告的 `counts` 中保留分子/分母；分母为零输出 null。`by_baseline_text_source` 按**固定样本采样时**的 native/OCR 层分开统计，适合跨版本公平比较；`by_evaluated_text_source` 按当前运行实际使用的文字来源统计，便于发现 OCR 路由变化，但两版的组成人群可能不同。`by_gold_type` 保留每种人工 type 的样本数、匹配率、分类与日期正确率以及错误模式计数。逐例 `failures` 用匿名页代号、页码、人工 type、指标、错误模式、影响级别和预测值定位错误；不写原文。日期预测等仍属受限临床信息，评估 JSON 保存在 `data/`。`date_confused_with_print/historical/planned_procedure/...` 只有在人工明确标注的其他日期与错误预测值相同时才赋予，不能凭程序猜原因。
 
 ## 公平比较与限制
 

@@ -12,7 +12,7 @@
 python -X utf8 scripts/gold_set.py review --run data/derived/v0.1_full --gold-dir data/gold_sets/aao_pdf_pages_v1
 ```
 
-终端会打印一个只供本机访问的网址。用本机浏览器打开。左侧是从原始 PDF 渲染的当前页；页面上方给出 PDF 文件路径和 SHA256，便于必要时用本机 PDF 阅读器打开原件。右侧依次是原生提取、OCR、normalized 文字、parser 预测和人工编辑区。点“上一页/下一页”切换样本；草稿可以反复保存。关闭终端或按 `Ctrl+C` 停止服务，已保存内容仍在 `annotations/`。
+终端会打印一个只供本机访问的网址。用本机浏览器打开。左侧是从原始 PDF 渲染的样本页；“PDF 前一页/后一页”可临时看同一 PDF 的上下文，“回样本页”返回要标注的页。页面上方给出 PDF 文件路径和 SHA256，便于必要时用本机 PDF 阅读器打开原件。右侧依次是**样本页**的原生提取、OCR、normalized 文字、parser 预测和人工编辑区；切换左侧上下文页不会改变标注目标。顶栏“上一页/下一页”才切换 Gold Set 样本。草稿可以反复保存。关闭终端或按 `Ctrl+C` 停止服务，已保存内容仍在 `annotations/`。
 
 如果原始 PDF 路径失效、SHA256 改变，review 工具会报错；先恢复原件，不要用同名替代文件继续标注。
 
