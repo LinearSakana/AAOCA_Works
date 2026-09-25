@@ -41,7 +41,21 @@ python -X utf8 -m aaoca_pipeline --config config/pipeline.sample.json --output d
 
 ## 路径与配置
 
-JSON 配置中的相对路径以**配置文件目录**为基准；CLI 覆盖路径以当前工作目录为基准。代码不含实际原始数据路径。当前配置分别指向原始 PDF 目录和 `data/sample_raw`，保留全部来源，但精确重复文件只对分段和时间线贡献一次。
+JSON 配置中的相对路径以**配置文件目录**为基准；CLI 覆盖路径以当前工作目录为基准。代码不含实际原始数据路径。`pipeline.full.json` 和 `pipeline.ocr.json` 使用 `${AAOCA_PDF_ROOT}` 指向额外的 PDF 根目录，保留全部来源，但精确重复文件只对分段和时间线贡献一次。
+
+Windows 和 Linux 都可以使用同一份配置。运行 `pipeline.full.json` 或 `pipeline.ocr.json` 前，先把环境变量设为实际 PDF 目录；`pipeline.sample.json` 只使用仓库内的 `data/sample_raw`，不需要设置该变量：
+
+```powershell
+$env:AAOCA_PDF_ROOT = 'E:\Kenkyu-Shiryou\AAOCA Cases'
+python -X utf8 -m aaoca_pipeline --config config/pipeline.full.json
+```
+
+```bash
+export AAOCA_PDF_ROOT=/data/AAOCA\ Cases
+python3 -X utf8 -m aaoca_pipeline --config config/pipeline.full.json
+```
+
+也可以不设置环境变量，直接用重复的 `--pdf-root` 覆盖配置中的 PDF 根目录。相对路径、`~` 和环境变量由程序在读取配置时展开；输入、输出和缓存路径的隔离规则不变。
 
 可完全通过参数使用其他数据：
 

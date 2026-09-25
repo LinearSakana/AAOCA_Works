@@ -4,7 +4,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
+
+
+def _resolve_config_path(value: str | Path, config_dir: Path) -> str:
+    """Resolve relative config paths and expand cross-platform env variables."""
+    expanded = os.path.expanduser(os.path.expandvars(str(value)))
+    path = Path(expanded)
+    if not path.is_absolute():
+        path = config_dir / path
+    return str(path.resolve())
 
 
 def main() -> None:
@@ -29,8 +39,11 @@ def main() -> None:
         settings = json.loads(config_path.read_text(encoding="utf-8-sig"))
         for key in ["cohort_csv", "output_root", "cache_root", "ocr_model_dir"]:
             if key in settings:
-                settings[key] = str((config_path.parent / settings[key]).resolve())
-        settings["pdf_roots"] = [str((config_path.parent / p).resolve()) for p in settings.get("pdf_roots", [])]
+                settings[key] = _resolve_config_path(settings[key], config_path.parent)
+        settings["pdf_roots"] = [
+            _resolve_config_path(path, config_path.parent)
+            for path in settings.get("pdf_roots", [])
+        ]
     for key, value in [("cohort_csv", args.csv), ("output_root", args.output), ("cache_root", args.cache)]:
         if value:
             settings[key] = str(value.resolve())

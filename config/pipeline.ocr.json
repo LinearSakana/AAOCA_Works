@@ -1,6 +1,6 @@
 {
   "cohort_csv": "../data/sample_list/AAOCA_患者病例_清洗后.csv",
-  "pdf_roots": ["E:/Kenkyu-Shiryou/AAOCA Cases", "../data/sample_raw"],
+  "pdf_roots": ["${AAOCA_PDF_ROOT}", "../data/sample_raw"],
   "output_root": "../data/derived/v0.1_full",
   "cache_root": "../data/derived/extraction_cache",
   "scope": "full_available_pdf_roots_with_targeted_local_ocr",
