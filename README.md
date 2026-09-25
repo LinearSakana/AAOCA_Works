@@ -161,3 +161,14 @@ python -X utf8 scripts/aaoca_exception_review.py validate `
 ```
 
 `data/review/aaoca_exception_review_v1/exception_cases.csv` 和 `exception_evidence.csv` **只包含例外患者**；普通高证据病例不会混入人工交付物。人工只编辑 `review_status`、`final_aaoca_judgment` 和 `reviewer_notes`。若先怀疑并做过针对性检查、后来排除 AAOCA，仍应标记为 `yes`。完整判定定义、reason code、兼容约定和最终完整性验证见 [AAOCA 例外病例复核说明](docs/aaoca_exception_review.md)。该目录包含姓名和院内编号，仅限受限本地使用并由 `.gitignore` 排除。
+
+面向人工的 `AAOCA_exception_review.xlsx` 同样只列出例外病例。复核者在“例外病例”表的黄色三列保存结果后，运行以下命令把三个人工字段安全回写到 CSV；命令会核对完整患者集合，且不会从 Excel 覆盖自动判断或证据列：
+
+```powershell
+python -X utf8 scripts/aaoca_exception_review.py import-workbook `
+  --output data/review/aaoca_exception_review_v1
+
+python -X utf8 scripts/aaoca_exception_review.py validate `
+  --output data/review/aaoca_exception_review_v1 `
+  --require-complete
+```

@@ -45,3 +45,11 @@ Reason counts overlap because one patient may need review for more than one issu
 The 230 automatic `yes` values are evidence-routing results, not clinician-confirmed labels. The exception queue intentionally includes cases that remain `yes` under the project definition but merit human review because their anatomy conflicts across documents or sits near the intended cohort boundary. A later normal result does not reverse `yes` when the record shows a real AAOCA workup.
 
 The review files are generated with `ruleset_version=aaoca_exception_rules_v1`, retain source table hashes, and do not modify the source pipeline snapshot. Human final judgments are blank until review. No LLM was used; `AaocaEvidenceExtractor` is only an interface for a future separately authorized local middleware.
+
+## Human review workbook
+
+The local `AAOCA_exception_review.xlsx` is an editable view over the same exception-only CSV contract. Its case sheet contains exactly 62 exception patients, its evidence sheet contains the same 654 selected evidence rows, and its guide sheet contains only aggregate counts, reason definitions and review instructions. The 170 ordinary high-evidence patients are not present as individual rows anywhere in the workbook.
+
+The workbook was exported, reopened, inspected and rendered sheet by sheet. The final formula-error scan matched zero cells. Illegal OpenXML control characters found in OCR text are replaced only in the workbook display layer; the source CSV and section evidence remain unchanged. A separate `import-workbook` command requires exact agreement between workbook and CSV patient IDs and copies only the three human fields back to `exception_cases.csv`, preserving the existing downstream schema and all automatic/provenance columns.
+
+Final regression checks passed all 70 tests. The source snapshot validator again reported 0 errors/0 warnings, the exception-package validator reported 0 errors, and a smoke import of the final saved workbook round-tripped all 62 exception patient IDs while leaving the automatic columns unchanged. No human review was fabricated: `reviewed_patients` remains 0.

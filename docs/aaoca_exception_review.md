@@ -51,12 +51,21 @@ python -X utf8 scripts/aaoca_exception_review.py validate `
   --output data/review/aaoca_exception_review_v1
 ```
 
-人工 CSV 只含例外病例：
+人工交付物只含例外病例：
 
 - `exception_cases.csv`：一位例外患者一行，保留自动判断、原因、证据摘要和人工字段；
 - `exception_evidence.csv`：只保留例外患者的少量、语义不同的证据行；
+- `AAOCA_exception_review.xlsx`：面向人工的工作簿，包含“例外病例”“证据”“说明”三个工作表；病例表黄色三列为人工编辑区；
 - `run_metadata.json`：规则版本、源 snapshot 表的 SHA256、聚合计数和人工字段约束；
 - `README.md`：本地复核简要说明。
+
+工作簿从上述 CSV 和 metadata 生成；它会再次核对 `human_deliverable_scope=exception_patients_only`、病例数和证据行数，不会把普通患者写入病例或证据工作表。在提供 `@oai/artifact-tool` 的维护环境中，可重建工作簿：
+
+```powershell
+node scripts/build_aaoca_exception_workbook.mjs `
+  --input data/review/aaoca_exception_review_v1 `
+  --output data/review/aaoca_exception_review_v1/AAOCA_exception_review.xlsx
+```
 
 人工只编辑以下列：
 
@@ -64,7 +73,14 @@ python -X utf8 scripts/aaoca_exception_review.py validate `
 - `final_aaoca_judgment`: `yes` / `no` / `uncertain`；
 - `reviewer_notes`。
 
-填写最终标签后，`review_status` 必须为 `reviewed`。需要在后续流程使用最终标签前，运行：
+如果直接编辑 CSV，可跳过导入步骤。如果在工作簿中编辑，保存后先把黄色三列回写到既有 CSV contract：
+
+```powershell
+python -X utf8 scripts/aaoca_exception_review.py import-workbook `
+  --output data/review/aaoca_exception_review_v1
+```
+
+导入会要求工作簿与 CSV 的患者 ID 集合完全相同，并且只复制 `review_status`、`final_aaoca_judgment` 和 `reviewer_notes`；自动判断、例外原因、证据及定位列不会从 Excel 回写。填写最终标签后，`review_status` 必须为 `reviewed`。需要在后续流程使用最终标签前，运行：
 
 ```powershell
 python -X utf8 scripts/aaoca_exception_review.py validate `
@@ -78,9 +94,10 @@ python -X utf8 scripts/aaoca_exception_review.py validate `
 - 输入必须有 `status=complete` 且 source hash verification 已通过。
 - 同时兼容旧 section type `surgery_related` 和当前 `procedure`。
 - 输出字段顺序由代码常量固定；`ruleset_version=aaoca_exception_rules_v1`，每次输出记录源 `run_metadata.json`、`patient_manifest.csv` 和 `section_index.csv` 的 SHA256。
+- CSV 仍是下游稳定接口；工作簿是可编辑的人工作业视图。`import-workbook` 只更新已有的三个人工列，因此不会改变自动阶段 schema 或证据表粒度。
 - 直接标识符仅从 snapshot 的 `private/patient_linkage.csv` 复制到受限的本地 review 目录，便于人工定位；这些文件不能提交或外传。
 - `AaocaEvidenceExtractor` 是明确的 middleware contract。未来经单独授权的本地 LLM 可以输出同一证据结构；患者层聚合、例外队列、人工字段和验证约束无需改写。当前版本完全使用 deterministic rules，不调用 LLM 或外部病例处理服务。
 
 ## 6. 质量边界
 
-自动结果是复核分流，不是临床金标准。规则可以证明某些可追溯文本被识别并按一致逻辑聚合，不能证明 OCR、文书归属或临床解剖一定正确。对冲突、肺动脉来源、复杂先心病和仅 OCR 证据，必须回看 `exception_evidence.csv` 指向的 section，必要时打开原 PDF 页面。
+自动结果是复核分流，不是临床金标准。规则可以证明某些可追溯文本被识别并按一致逻辑聚合，不能证明 OCR、文书归属或临床解剖一定正确。对冲突、肺动脉来源、复杂先心病和仅 OCR 证据，必须回看 `exception_evidence.csv` 指向的 section，必要时打开原 PDF 页面。工作簿为了符合 Excel/OpenXML 限制，只在展示层把 OCR 文本中 XML 禁止的控制码替换为空格；源 CSV、section JSON 和原始定位保持不变。

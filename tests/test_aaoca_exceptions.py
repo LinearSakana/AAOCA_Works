@@ -5,10 +5,13 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from xml.sax.saxutils import escape
+import zipfile
 
 from aaoca_pipeline.aaoca_exceptions import (
     DeterministicAaocaEvidenceExtractor,
     assess_patients,
+    import_review_workbook,
     validate_review_package,
     write_exception_package,
 )
@@ -34,6 +37,75 @@ def _section(patient_id: str, section_id: str, text: str, section_type: str = "p
         "text_path": f"sections/{document_id}.json",
         "text_reference": "/sections/0/text",
     }
+
+
+def _write_review_xlsx(path: Path, reviews: list[dict[str, str]]) -> None:
+    """Write the smallest OOXML workbook needed to test review round-tripping."""
+    headers = {
+        "A": "患者ID",
+        "P": "复核状态（可编辑）",
+        "Q": "人工最终判断（可编辑）",
+        "R": "复核备注（可编辑）",
+    }
+
+    def inline_cell(reference: str, value: str) -> str:
+        return f'<c r="{reference}" t="inlineStr"><is><t>{escape(value)}</t></is></c>'
+
+    rows = [
+        '<row r="4">' + "".join(inline_cell(f"{column}4", value) for column, value in headers.items()) + "</row>"
+    ]
+    for index, review in enumerate(reviews, start=5):
+        rows.append(
+            f'<row r="{index}">'
+            + inline_cell(f"A{index}", review["patient_id"])
+            + inline_cell(f"P{index}", review["review_status"])
+            + inline_cell(f"Q{index}", review["final_aaoca_judgment"])
+            + inline_cell(f"R{index}", review["reviewer_notes"])
+            + "</row>"
+        )
+    worksheet = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<sheetData>{"".join(rows)}</sheetData></worksheet>'
+    )
+    workbook = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheets><sheet name="例外病例" sheetId="1" r:id="rId1"/></sheets></workbook>'
+    )
+    relationships = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet1.xml"/></Relationships>'
+    )
+    package_relationships = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="xl/workbook.xml"/></Relationships>'
+    )
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '</Types>'
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", content_types)
+        archive.writestr("_rels/.rels", package_relationships)
+        archive.writestr("xl/workbook.xml", workbook)
+        archive.writestr("xl/_rels/workbook.xml.rels", relationships)
+        archive.writestr("xl/worksheets/sheet1.xml", worksheet)
 
 
 class AaocaExceptionTests(unittest.TestCase):
@@ -179,6 +251,39 @@ class AaocaExceptionTests(unittest.TestCase):
             result = validate_review_package(output)
             self.assertEqual(result["validation_status"], "failed")
             self.assertIn("final_judgment_without_reviewed_status", {e["code"] for e in result["errors"]})
+
+    def test_import_workbook_updates_only_human_fields(self):
+        with tempfile.TemporaryDirectory() as temp:
+            run = Path(temp) / "run"
+            output = Path(temp) / "review"
+            self._make_run(run)
+            write_exception_package(run, output)
+            with (output / "exception_cases.csv").open(encoding="utf-8-sig", newline="") as handle:
+                before = list(csv.DictReader(handle))
+            reviews = []
+            for index, row in enumerate(before):
+                reviews.append({
+                    "patient_id": row["patient_id"],
+                    "review_status": "reviewed" if index == 0 else "not_reviewed",
+                    "final_aaoca_judgment": "yes" if index == 0 else "",
+                    "reviewer_notes": "核对原文后保留" if index == 0 else "",
+                })
+            workbook = output / "AAOCA_exception_review.xlsx"
+            _write_review_xlsx(workbook, reviews)
+            result = import_review_workbook(output, workbook)
+            self.assertEqual(result["validation_status"], "passed")
+            self.assertEqual(result["imported_review_rows"], len(before))
+            self.assertEqual(result["reviewed_patients"], 1)
+
+            with (output / "exception_cases.csv").open(encoding="utf-8-sig", newline="") as handle:
+                after = list(csv.DictReader(handle))
+            self.assertEqual(after[0]["review_status"], "reviewed")
+            self.assertEqual(after[0]["final_aaoca_judgment"], "yes")
+            self.assertEqual(after[0]["reviewer_notes"], "核对原文后保留")
+            self.assertEqual(
+                after[0]["automatic_aaoca_judgment"],
+                before[0]["automatic_aaoca_judgment"],
+            )
 
 
 if __name__ == "__main__":

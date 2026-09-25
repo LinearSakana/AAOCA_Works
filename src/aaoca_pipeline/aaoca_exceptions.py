@@ -21,13 +21,26 @@ from dataclasses import asdict, dataclass
 import hashlib
 import json
 from pathlib import Path
+import posixpath
 import re
 from typing import Iterable, Protocol
+import xml.etree.ElementTree as ET
+import zipfile
 
 from .io_utils import sha256_file, write_csv, write_json, write_text
 
 
 RULESET_VERSION = "aaoca_exception_rules_v1"
+
+XLSX_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+XLSX_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+XLSX_PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+WORKBOOK_REVIEW_HEADERS = {
+    "patient_id": "患者ID",
+    "review_status": "复核状态（可编辑）",
+    "final_aaoca_judgment": "人工最终判断（可编辑）",
+    "reviewer_notes": "复核备注（可编辑）",
+}
 
 CLINICAL_TYPES = {
     "admission",
@@ -771,6 +784,9 @@ def write_exception_package(run_root: Path, output: Path) -> dict:
 `exception_cases.csv` 每位患者一行；只修改 `review_status`、
 `final_aaoca_judgment` 和 `reviewer_notes`。
 `exception_evidence.csv` 保存证据、文书、section、页码和原文引用。
+若目录内有 `AAOCA_exception_review.xlsx`，其中也只包含例外患者；人工可在
+“例外病例”工作表的黄色三列填写结果，再用 `import-workbook` 命令把这三列
+安全回写到 `exception_cases.csv`。导入不会接受或覆盖任何自动结果和证据列。
 
 判定问题不是“最终是否确诊 AAOCA”，而是 AAOCA 或相应冠状动脉异常
 是否曾真正进入考虑、怀疑、检查、讨论、鉴别或排除过程。即使后来排除，
@@ -782,6 +798,173 @@ def write_exception_package(run_root: Path, output: Path) -> dict:
 """,
     )
     return receipt
+
+
+def _xlsx_column_number(reference: str) -> int:
+    match = re.fullmatch(r"([A-Z]+)[0-9]+", reference.upper())
+    if not match:
+        raise ValueError(f"Invalid XLSX cell reference: {reference}")
+    result = 0
+    for character in match.group(1):
+        result = result * 26 + ord(character) - ord("A") + 1
+    return result
+
+
+def _xlsx_string_table(archive: zipfile.ZipFile) -> list[str]:
+    try:
+        root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+    except KeyError:
+        return []
+    namespace = {"m": XLSX_MAIN_NS}
+    return ["".join(node.text or "" for node in item.findall(".//m:t", namespace))
+            for item in root.findall("m:si", namespace)]
+
+
+def _xlsx_cell_text(cell: ET.Element, shared_strings: list[str]) -> str:
+    namespace = {"m": XLSX_MAIN_NS}
+    cell_type = cell.get("t", "")
+    if cell_type == "inlineStr":
+        return "".join(node.text or "" for node in cell.findall(".//m:is//m:t", namespace))
+    value = cell.find("m:v", namespace)
+    raw = value.text if value is not None and value.text is not None else ""
+    if cell_type == "s" and raw:
+        try:
+            return shared_strings[int(raw)]
+        except (IndexError, ValueError) as error:
+            raise ValueError(f"Invalid shared-string index in {cell.get('r', 'unknown cell')}") from error
+    if cell_type == "b":
+        return "TRUE" if raw == "1" else "FALSE"
+    return raw
+
+
+def _xlsx_sheet_path(archive: zipfile.ZipFile, sheet_name: str) -> str:
+    main_ns = {"m": XLSX_MAIN_NS, "r": XLSX_REL_NS}
+    workbook = ET.fromstring(archive.read("xl/workbook.xml"))
+    relationship_id = ""
+    for sheet in workbook.findall("m:sheets/m:sheet", main_ns):
+        if sheet.get("name") == sheet_name:
+            relationship_id = sheet.get(f"{{{XLSX_REL_NS}}}id", "")
+            break
+    if not relationship_id:
+        raise ValueError(f"Workbook is missing required sheet: {sheet_name}")
+    relationships = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+    target = ""
+    for relation in relationships.findall(f"{{{XLSX_PACKAGE_REL_NS}}}Relationship"):
+        if relation.get("Id") == relationship_id:
+            target = relation.get("Target", "")
+            break
+    if not target:
+        raise ValueError(f"Workbook relationship is missing for sheet: {sheet_name}")
+    if target.startswith("/"):
+        return target.lstrip("/")
+    return posixpath.normpath(posixpath.join("xl", target))
+
+
+def read_review_workbook(workbook_path: Path) -> list[dict[str, str]]:
+    """Read only the reviewer-editable columns from the exception workbook.
+
+    The parser uses the stable OOXML cell representation directly so importing
+    completed reviews does not add a runtime Excel dependency to the Python
+    pipeline. Automatic labels and evidence are intentionally not read back.
+    """
+    workbook_path = Path(workbook_path).resolve()
+    with zipfile.ZipFile(workbook_path) as archive:
+        shared_strings = _xlsx_string_table(archive)
+        sheet_path = _xlsx_sheet_path(archive, "例外病例")
+        root = ET.fromstring(archive.read(sheet_path))
+    namespace = {"m": XLSX_MAIN_NS}
+    rows: dict[int, dict[int, str]] = {}
+    formula_cells: set[str] = set()
+    for row in root.findall(".//m:sheetData/m:row", namespace):
+        row_number = int(row.get("r", "0"))
+        cells: dict[int, str] = {}
+        for cell in row.findall("m:c", namespace):
+            reference = cell.get("r", "")
+            if cell.find("m:f", namespace) is not None:
+                formula_cells.add(reference)
+            cells[_xlsx_column_number(reference)] = _xlsx_cell_text(cell, shared_strings)
+        rows[row_number] = cells
+
+    header_cells = rows.get(4, {})
+    header_columns = {value: column for column, value in header_cells.items()}
+    missing_headers = [value for value in WORKBOOK_REVIEW_HEADERS.values() if value not in header_columns]
+    if missing_headers:
+        raise ValueError(f"Workbook is missing required review columns: {missing_headers}")
+    column_by_field = {field: header_columns[label] for field, label in WORKBOOK_REVIEW_HEADERS.items()}
+
+    reviews: list[dict[str, str]] = []
+    editable_columns = {column_by_field[field] for field in WORKBOOK_REVIEW_HEADERS}
+    for row_number in sorted(number for number in rows if number > 4):
+        values = rows[row_number]
+        patient_id = values.get(column_by_field["patient_id"], "").strip()
+        editable_values = {column: values.get(column, "") for column in editable_columns}
+        if not patient_id:
+            if any(value.strip() for value in editable_values.values()):
+                raise ValueError(f"Workbook row {row_number} has review content but no patient_id")
+            continue
+        for column in editable_columns:
+            reference = next((cell.get("r", "") for cell in root.findall(
+                f".//m:sheetData/m:row[@r='{row_number}']/m:c", namespace
+            ) if _xlsx_column_number(cell.get("r", "")) == column), "")
+            if reference in formula_cells:
+                raise ValueError(f"Formulas are not allowed in reviewer fields: {reference}")
+        reviews.append({
+            "patient_id": patient_id,
+            "review_status": values.get(column_by_field["review_status"], "").strip(),
+            "final_aaoca_judgment": values.get(column_by_field["final_aaoca_judgment"], "").strip(),
+            "reviewer_notes": values.get(column_by_field["reviewer_notes"], ""),
+        })
+    review_ids = [row["patient_id"] for row in reviews]
+    if len(review_ids) != len(set(review_ids)):
+        raise ValueError("Workbook contains duplicate patient_id values")
+    return reviews
+
+
+def import_review_workbook(output: Path, workbook_path: Path | None = None) -> dict:
+    """Atomically copy validated human fields from XLSX back to the CSV contract."""
+    output = Path(output).resolve()
+    workbook_path = (Path(workbook_path).resolve() if workbook_path
+                     else output / "AAOCA_exception_review.xlsx")
+    cases = _read_csv(output / "exception_cases.csv")
+    reviews = read_review_workbook(workbook_path)
+    case_ids = {row.get("patient_id", "") for row in cases}
+    review_ids = {row["patient_id"] for row in reviews}
+    if review_ids != case_ids:
+        missing = sorted(case_ids - review_ids)
+        unexpected = sorted(review_ids - case_ids)
+        raise ValueError(
+            f"Workbook/CSV patient set mismatch: missing={missing[:10]}, unexpected={unexpected[:10]}"
+        )
+    allowed_status = {"not_reviewed", "in_review", "reviewed"}
+    allowed_final = {"", "yes", "no", "uncertain"}
+    invalid: list[str] = []
+    review_by_id = {row["patient_id"]: row for row in reviews}
+    for patient_id, review in review_by_id.items():
+        status = review["review_status"]
+        final = review["final_aaoca_judgment"]
+        if status not in allowed_status:
+            invalid.append(f"{patient_id}: invalid review_status={status!r}")
+        if final not in allowed_final:
+            invalid.append(f"{patient_id}: invalid final_aaoca_judgment={final!r}")
+        if final and status != "reviewed":
+            invalid.append(f"{patient_id}: final judgment requires review_status='reviewed'")
+    if invalid:
+        raise ValueError("Invalid workbook review values: " + "; ".join(invalid[:10]))
+
+    for case in cases:
+        review = review_by_id[case["patient_id"]]
+        for field in ("review_status", "final_aaoca_judgment", "reviewer_notes"):
+            case[field] = review[field]
+    write_csv(output / "exception_cases.csv", cases, CASE_FIELDS)
+    validation = validate_review_package(output)
+    if validation["validation_status"] != "passed":
+        raise ValueError(f"Imported review failed package validation: {validation['errors'][:10]}")
+    return {
+        **validation,
+        "workbook": str(workbook_path),
+        "imported_review_rows": len(reviews),
+        "updated_fields": ["review_status", "final_aaoca_judgment", "reviewer_notes"],
+    }
 
 
 def validate_review_package(output: Path, require_complete: bool = False) -> dict:

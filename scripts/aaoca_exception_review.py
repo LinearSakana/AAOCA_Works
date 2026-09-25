@@ -6,6 +6,8 @@ Examples:
       --output data/review/aaoca_exception_review_v1
   python -X utf8 scripts/aaoca_exception_review.py validate \
       --output data/review/aaoca_exception_review_v1
+  python -X utf8 scripts/aaoca_exception_review.py import-workbook \
+      --output data/review/aaoca_exception_review_v1
 """
 
 from __future__ import annotations
@@ -15,7 +17,11 @@ import json
 from pathlib import Path
 import sys
 
-from aaoca_pipeline.aaoca_exceptions import validate_review_package, write_exception_package
+from aaoca_pipeline.aaoca_exceptions import (
+    import_review_workbook,
+    validate_review_package,
+    write_exception_package,
+)
 
 
 def main() -> int:
@@ -30,11 +36,24 @@ def main() -> int:
     validate.add_argument("--output", type=Path, required=True, help="Review package directory")
     validate.add_argument("--require-complete", action="store_true", help="Require every exception to have a final label")
 
+    import_workbook = subparsers.add_parser(
+        "import-workbook",
+        help="Copy validated human fields from the exception workbook to exception_cases.csv",
+    )
+    import_workbook.add_argument("--output", type=Path, required=True, help="Review package directory")
+    import_workbook.add_argument(
+        "--workbook",
+        type=Path,
+        help="Workbook path; defaults to <output>/AAOCA_exception_review.xlsx",
+    )
+
     args = parser.parse_args()
     if args.command == "build":
         result = write_exception_package(args.run, args.output)
-    else:
+    elif args.command == "validate":
         result = validate_review_package(args.output, args.require_complete)
+    else:
+        result = import_review_workbook(args.output, args.workbook)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("validation_status", "passed") == "passed" else 1
 
