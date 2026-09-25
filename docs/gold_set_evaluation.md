@@ -30,6 +30,8 @@ python -X utf8 scripts/gold_set.py sample --run data/derived/v0.1_full --gold-di
 
 每个比率都在报告的 `counts` 中保留分子/分母；分母为零输出 null。`by_baseline_text_source` 按**固定样本采样时**的 native/OCR 层分开统计，适合跨版本公平比较；`by_evaluated_text_source` 按当前运行实际使用的文字来源统计，便于发现 OCR 路由变化，但两版的组成人群可能不同。`by_gold_type` 保留每种人工 type 的样本数、匹配率、分类与日期正确率以及错误模式计数。逐例 `failures` 用匿名页代号、页码、人工 type、指标、错误模式、影响级别和预测值定位错误；不写原文。日期预测等仍属受限临床信息，评估 JSON 保存在 `data/`。`date_confused_with_print/historical/planned_procedure/...` 只有在人工明确标注的其他日期与错误预测值相同时才赋予，不能凭程序猜原因。
 
+`failure_modes` 按错误实例计数：type/date/subtype/section 错误每段计一次，文字差异每页计一次，漏/多 boundary 按边界数计。逐例 `failures` 中 boundary 行的 `count` 给出该页的边界错误数。用 `unit_id` 在 review 顶栏跳转回 PDF，逐条核对后再决定 parser 修改方向。
+
 ## 公平比较与限制
 
 ```powershell

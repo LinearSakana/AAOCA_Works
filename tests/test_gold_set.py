@@ -11,7 +11,7 @@ import unittest
 
 from aaoca_pipeline.gold_common import (SCHEMA, SAMPLE_SCHEMA, digest, freeze,
                                         sample, validate_annotation, write_json)
-from aaoca_pipeline.gold_evaluate import compare, edit_distance, evaluate
+from aaoca_pipeline.gold_evaluate import _score_unit, compare, edit_distance, evaluate
 from aaoca_pipeline.gold_review import _seed
 
 
@@ -214,6 +214,19 @@ class GoldSetTests(unittest.TestCase):
         self.assertEqual(counts["subtype_excluded_schema_gap"], 1)
         self.assertEqual(counts["date_excluded_uncertain"], 1)
         self.assertEqual(report["metrics"]["text_pages"], 2)
+
+    def test_print_date_confusion_is_named_even_without_an_event_date(self):
+        unit = {"unit_id": "pg_1", "source_sha256": "a" * 64, "page": 1, "stratum": "native_record"}
+        self.manifest = {"sample_id": "sample"}
+        text = "记录\n打印时间 2024-01-03"
+        annotation = self.annotation(unit, text, [self.section(
+            1, 2, "progress", other_dates=[{"value": "2024-01-03", "role": "print", "evidence": "打印时间"}])])
+        pred = {"start_line": 1, "end_line": 2, "section_type": "progress", "section_subtype": "",
+                "section_date": "2024-01-03", "date_source": "title_timestamp", "date_uncertain": False}
+        counts, failures, _ = _score_unit(unit, annotation, {"normalized_text": text}, [pred])
+        self.assertEqual(counts["date_evaluable"], 1)
+        self.assertEqual(counts["date_value_correct"], 0)
+        self.assertIn("date_confused_with_print", [failure["mode"] for failure in failures])
 
 
 if __name__ == "__main__":

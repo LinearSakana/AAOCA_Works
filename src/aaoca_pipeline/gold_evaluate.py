@@ -239,13 +239,15 @@ def _score_unit(unit: dict, annotation: dict, page: dict, predictions: list[dict
             if gtype:
                 type_stats[gtype]["date_value_correct"] += int(value_ok)
             if not value_ok:
+                distractor = next((x["role"] for x in dt.get("other_dates", []) if x["value"] == observed), "")
                 if not observed:
                     mode = "missing_date"
+                elif distractor:
+                    mode = "date_confused_with_" + distractor
                 elif not expected:
                     mode = "invented_date"
                 else:
-                    distractor = next((x["role"] for x in dt.get("other_dates", []) if x["value"] == observed), "")
-                    mode = "date_confused_with_" + distractor if distractor else "wrong_date"
+                    mode = "wrong_date"
                 failures.append(_failure(unit, "date", mode, gtype, impact, section_index=gi + 1,
                                          expected=expected, predicted=observed))
             if dt["status"] == "known":
@@ -336,10 +338,12 @@ def evaluate(gold_dir: Path, revision: str, output: Path) -> dict:
             by_type[kind].update(stats)
         for failure in page_failures:
             if failure["gold_type"]:
-                by_type[failure["gold_type"]][failure["mode"]] += 1
+                by_type[failure["gold_type"]][failure["mode"]] += failure.get("count", 1)
         failures.extend(page_failures)
         unit_scores.append(score)
-    mode_counts = Counter(f["mode"] for f in failures)
+    mode_counts = Counter()
+    for failure in failures:
+        mode_counts[failure["mode"]] += failure.get("count", 1)
     return {"scoring_version": SCORING_VERSION, "sample_id": manifest["sample_id"],
             "sample_schema": manifest["schema_version"], "annotation_revision": revision,
             "annotation_schema": SCHEMA, "annotation_digest": receipt["annotation_digest"],
