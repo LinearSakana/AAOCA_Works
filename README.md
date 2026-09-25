@@ -117,3 +117,18 @@ python -X utf8 scripts/validate_outputs.py data/derived/v0.1_full --report repor
 ```
 
 测试使用合成患者/临时 PDF，覆盖匹配冲突、重复、异常提取、原文保留、打印日期污染、跨页覆盖和时间语义。真实样本与全量迭代及剩余限制记录在 `reports/` 与 `SESSION_LOG.md`。开发中间运行位于 `data/derived/iteration_*`，不可将其计数当作最终结果。
+
+## Gold Set 人工核验与独立评估
+
+用 `scripts/gold_set.py` 从已完成且输入 SHA256 验证通过的运行中固定抽样，浏览原始 PDF 页并校正文字、section、type/subtype 与事件日期，冻结人工答案，再对任意完整 parser 运行评分。同一 PDF 以内容 SHA256 + 页码定位，所以重新分段后 section ID 的变化不会破坏比较。
+
+当前本地已抽取 `data/gold_sets/aao_pdf_pages_v1/` 的 48 页固定样本（4 个 native/OCR × 病历/检验层各 12 页）；样本、文字和人工答案因隐私留在 Git 忽略的 `data/`。**这 48 页目前还没有真正完成的人工 annotation，因此没有可宣称的真实 parser accuracy。** 现阶段可验证的是抽样、标注结构、冻结摘要及合成样本上的评估逻辑。
+
+开始核验：
+
+```powershell
+python -X utf8 scripts/gold_set.py review --run data/derived/v0.1_full --gold-dir data/gold_sets/aao_pdf_pages_v1
+python -X utf8 scripts/gold_set.py validate --gold-dir data/gold_sets/aao_pdf_pages_v1
+```
+
+操作步骤、日期角色和不确定标记见 [人工核验指南](docs/gold_set_review.md)；抽样方法、评分定义、冻结/版本比较命令见 [评估规范](docs/gold_set_evaluation.md)。实际抽样覆盖与局限见 [抽样报告](reports/gold_set_sampling_2026-09-25.md)。
