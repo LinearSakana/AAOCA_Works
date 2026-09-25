@@ -1,0 +1,16 @@
+{
+  "validation_status": "passed",
+  "error_count": 0,
+  "error_types": {},
+  "errors": [],
+  "warning_count": 0,
+  "warnings": [],
+  "counts": {
+    "patients": 232,
+    "source_documents": 365,
+    "canonical_documents": 342,
+    "pages": 13485,
+    "sections": 13234,
+    "timeline_events": 9704
+  }
+}

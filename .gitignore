@@ -1,0 +1,10 @@
+# All source and derived patient data stay local. Reports must use aggregate IDs.
+data/
+scratch/
+models/
+logs/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/

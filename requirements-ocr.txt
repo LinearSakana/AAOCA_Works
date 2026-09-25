@@ -1,0 +1,4 @@
+-r requirements.txt
+rapidocr==3.9.2
+onnxruntime>=1.20,<2
+opencv-python>=4.10,<5

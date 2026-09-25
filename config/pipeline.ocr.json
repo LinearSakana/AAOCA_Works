@@ -1,0 +1,14 @@
+{
+  "cohort_csv": "../data/sample_list/AAOCA_患者病例_清洗后.csv",
+  "pdf_roots": ["E:/Kenkyu-Shiryou/AAOCA Cases", "../data/sample_raw"],
+  "output_root": "../data/derived/v0.1_full",
+  "cache_root": "../data/derived/extraction_cache",
+  "scope": "full_available_pdf_roots_with_targeted_local_ocr",
+  "verify_source_hashes": true,
+  "ocr": "missing",
+  "ocr_model_dir": "../models/rapidocr",
+  "ocr_workers": 4,
+  "ocr_threads": 2,
+  "ocr_render_scale": 2.0,
+  "ocr_max_pages": 0
+}

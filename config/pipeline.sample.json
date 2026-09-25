@@ -1,0 +1,8 @@
+{
+  "cohort_csv": "../data/sample_list/AAOCA_患者病例_清洗后.csv",
+  "pdf_roots": ["../data/sample_raw"],
+  "output_root": "../data/derived/iteration_01_sample",
+  "cache_root": "../data/derived/extraction_cache",
+  "scope": "sample",
+  "verify_source_hashes": true
+}
