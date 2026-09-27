@@ -40,7 +40,7 @@ class CaseExplorerHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store" if api else "no-cache")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
             "connect-src 'self'; object-src 'self'; frame-src 'self'; base-uri 'none'; frame-ancestors 'none'",
         )
 
@@ -288,4 +288,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

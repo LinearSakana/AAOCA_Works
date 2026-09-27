@@ -19,6 +19,14 @@
 
 可选 management sidecar 不是按目录名盲目接入：只有其 metadata 中的 `run_metadata`、`patient_manifest` 与 `section_index` SHA256 全部匹配当前 snapshot 时才会加载。
 
+## 界面
+
+- **数据总览**：当前规模、文书构成、文本来源、日期覆盖、管理方式与病例入口；年份、类别和计数均来自活动 snapshot。
+- **病例浏览**：患者搜索、动态筛选与排序；单例页提供时间线、来源文档、全部章节、按需正文和原 PDF 页定位。
+- **窄屏模式**：选择病例后进入专注阅读，并可一键返回病例列表；章节查看器独立滚动，关闭后回到原上下文。
+
+界面不加载 CDN，不预取全部正文。概览和列表只使用索引字段，点击章节时才读取对应 JSON，点击 PDF 时才流式读取源文件。
+
 ## 启动
 
 从工程根目录运行：
@@ -57,8 +65,8 @@ python -X utf8 -m case_explorer --run data/derived/v0.1_full --include-identifie
 
 ```powershell
 python -X utf8 -m unittest discover -s case_explorer/tests -v
+node --check case_explorer/static/app.js
 python -X utf8 -m case_explorer --run data/derived/v0.1_full --port 8765
 ```
 
-后续前端批次会加入真实浏览器交互与窄屏验证。
-
+真实浏览器验收覆盖 1440×1000、768×900 与 390×844：总览、病例筛选、时间线、来源文档、章节搜索、正文查看器、PDF 链接、移动端返回路径、滚动/溢出和控制台错误。验收截图写入 Git 忽略的 `output/playwright/`。

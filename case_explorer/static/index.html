@@ -4,11 +4,180 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AAOCA 病例浏览器</title>
+    <meta
+      name="description"
+      content="本地只读的 AAOCA 病例文书总览、时间线与来源核查界面"
+    />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main>
-      <h1>AAOCA 病例浏览器</h1>
-      <p>动态数据 API 已就绪；交互界面将在下一批修改中接入。</p>
-    </main>
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+    <div id="app" class="app-shell" aria-busy="true">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div>
+            <h1>AAOCA 病例浏览器</h1>
+            <p>文书 · 时间线 · 来源证据</p>
+          </div>
+        </div>
+
+        <nav class="primary-nav" aria-label="主要视图">
+          <button class="nav-button is-active" type="button" data-view="overview" aria-current="page">
+            数据总览
+          </button>
+          <button class="nav-button" type="button" data-view="cases">病例浏览</button>
+        </nav>
+
+        <div class="run-controls">
+          <label for="run-select">数据快照</label>
+          <select id="run-select" aria-label="选择数据快照"></select>
+          <span id="run-status" class="status-dot" data-tone="loading">正在连接</span>
+        </div>
+      </header>
+
+      <div id="reload-banner" class="reload-banner" role="status" hidden></div>
+
+      <main id="main-content" tabindex="-1">
+        <section id="overview-view" class="view overview-view" aria-labelledby="overview-title">
+          <div class="view-heading">
+            <div>
+              <h2 id="overview-title">数据总览</h2>
+              <p id="overview-subtitle" class="view-description">正在读取当前快照…</p>
+            </div>
+            <button id="open-cohort" class="primary-action" type="button">进入病例浏览</button>
+          </div>
+
+          <div id="metric-grid" class="metric-grid" aria-label="核心数据规模"></div>
+
+          <div class="overview-grid overview-grid--primary">
+            <section class="panel section-composition-panel" aria-labelledby="section-composition-title">
+              <div class="panel-heading">
+                <div>
+                  <h3 id="section-composition-title">文书构成</h3>
+                </div>
+                <span id="section-composition-total" class="panel-total"></span>
+              </div>
+              <div id="section-composition" class="bar-list"></div>
+            </section>
+
+            <section class="panel source-panel" aria-labelledby="source-title">
+              <div class="panel-heading">
+                <div>
+                  <h3 id="source-title">文本来源</h3>
+                </div>
+              </div>
+              <div class="source-layout">
+                <div id="source-donut" class="donut" role="img" aria-label="文本来源构成">
+                  <div class="donut-center"><strong></strong><span>章节</span></div>
+                </div>
+                <div id="source-legend" class="legend-list"></div>
+              </div>
+              <div id="quality-facts" class="quality-facts"></div>
+            </section>
+          </div>
+
+          <div class="overview-grid overview-grid--secondary">
+            <section class="panel timeline-panel" aria-labelledby="timeline-title">
+              <div class="panel-heading">
+                <div>
+                  <h3 id="timeline-title">时间线覆盖</h3>
+                </div>
+                <span class="panel-note">按事件年份</span>
+              </div>
+              <div id="timeline-chart" class="timeline-chart"></div>
+            </section>
+
+            <section id="management-panel" class="panel management-panel" aria-labelledby="management-title">
+              <div class="panel-heading">
+                <div>
+                  <h3 id="management-title">观察到的管理方式</h3>
+                </div>
+                <span class="method-chip">规则提取</span>
+              </div>
+              <div id="management-chart"></div>
+            </section>
+          </div>
+
+          <section class="panel cohort-preview" aria-labelledby="cohort-preview-title">
+            <div class="panel-heading">
+              <div>
+                <h3 id="cohort-preview-title">病例入口</h3>
+              </div>
+              <button id="view-all-cases" class="text-action" type="button">查看全部病例</button>
+            </div>
+            <div id="cohort-preview-list" class="preview-list"></div>
+          </section>
+        </section>
+
+        <section id="cases-view" class="view cases-view" aria-label="病例浏览" hidden>
+          <aside class="cohort-panel" aria-labelledby="cohort-panel-title">
+            <div class="cohort-heading">
+              <div>
+                <p class="eyebrow">Patient cohort</p>
+                <h2 id="cohort-panel-title">病例列表</h2>
+              </div>
+              <span id="cohort-count" class="count-chip">—</span>
+            </div>
+
+            <div class="cohort-filters">
+              <label class="search-field">
+                <span class="sr-only">搜索病例</span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.4-4.4m2.4-5.1a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z" /></svg>
+                <input id="patient-search" type="search" autocomplete="off" placeholder="搜索患者 ID" />
+              </label>
+              <div class="filter-grid">
+                <label>文书类型<select id="section-type-filter"><option value="">全部类型</option></select></label>
+                <label>解析状态<select id="parse-status-filter"><option value="">全部状态</option></select></label>
+                <label id="management-filter-wrap">管理方式<select id="management-filter"><option value="">全部状态</option></select></label>
+                <label>排序<select id="patient-sort">
+                  <option value="latest_desc">最近记录优先</option>
+                  <option value="sections_desc">文书丰富度</option>
+                  <option value="patient_asc">患者 ID</option>
+                </select></label>
+              </div>
+              <label id="review-filter-wrap" class="check-filter">
+                <input id="review-filter" type="checkbox" />
+                <span>仅看需人工复核</span>
+              </label>
+            </div>
+
+            <div id="patient-list" class="patient-list" aria-live="polite"></div>
+            <button id="load-more" class="load-more" type="button" hidden>加载更多</button>
+          </aside>
+
+          <article id="case-workspace" class="case-workspace" aria-live="polite">
+            <div id="case-empty" class="case-empty">
+              <div class="empty-illustration" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </div>
+              <h2>选择病例</h2>
+            </div>
+            <div id="case-content" hidden>
+              <header id="patient-header" class="patient-header"></header>
+              <nav id="case-tabs" class="case-tabs" aria-label="病例内容">
+                <button type="button" data-case-tab="timeline" class="is-active" aria-current="page">时间线</button>
+                <button type="button" data-case-tab="documents">来源文档</button>
+                <button type="button" data-case-tab="sections">全部章节</button>
+              </nav>
+              <div id="case-tab-content" class="case-tab-content"></div>
+            </div>
+          </article>
+
+          <aside id="section-inspector" class="section-inspector" aria-labelledby="inspector-title">
+            <div id="inspector-empty" class="inspector-empty">
+              <div class="inspector-lines" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+              <h2 id="inspector-title">选择章节</h2>
+            </div>
+            <div id="inspector-content" hidden></div>
+          </aside>
+          <button id="inspector-backdrop" class="inspector-backdrop" type="button" aria-label="关闭证据查看器" hidden></button>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    </div>
+    <script type="module" src="/app.js"></script>
   </body>
 </html>
