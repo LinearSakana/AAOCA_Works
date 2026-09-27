@@ -71,35 +71,51 @@ CSV 默认字段为 `住院号、门诊号、姓名、病历、检验`；自定�
 
 完整 OCR 配置输出到 `data/derived/v0.1_full/`；纯文本层配置输出到 `data/derived/v0.1_text_layer/`。
 
-| 文件 | 粒度及用途 |
-|---|---|
-| `patient_manifest.csv` | 保留 CSV 每一行；PDF/解析/section 数与可靠时间范围。`n_pdf` 计唯一内容，`n_source_pdf` 计所有来源。 |
-| `document_index.csv` | 每个来源 PDF 一行，包括重复、未匹配和失败来源；重复行的 `duplicate_of` 指向 canonical 文档。 |
-| `section_index.csv` | 每个 canonical 文档分段一行；类型、日期、日期来源、页/行/字符定位、质量标记和正文引用。 |
-| `patient_timeline.csv` | 患者匹配明确且日期有模板依据的 section，按患者、时间排序。不是医学事件金标准。 |
-| `page_index.csv` | 每页原始字符数、处理状态、OCR 状态和置信度汇总。 |
-| `date_mentions.csv` | 正文所有可识别日期与证据，分开存放；这些日期不会自动进入时间线。 |
-| `extracted/<document_id>.json` | 原生 PDF 原文、页边界、文字坐标、页级质量诊断，不被 OCR 覆盖。 |
-| `normalized/<document_id>.json` | raw、OCR、normalized 三种表示及映射；删除行与原因可查。 |
-| `normalized/<document_id>.txt` | 可阅读文本，带显式页面标记和换页符。 |
-| `sections/<document_id>.json` | 完整分段正文、逐页 span、日期 evidence 与 mention。 |
-| `qc/` | 缺失患者/未匹配文件/身份问题、解析问题、重复来源、日期不确定、OCR 队列、行覆盖账本与 cohort 汇总。 |
-| `source_inventory.csv` | 输入路径、SHA256、结束时不变性核验。 |
-| `run_metadata.json`、`logs/pipeline.log` | 配置、软件/模型版本、运行状态、计数与过程日志。 |
-| `private/` | 本地患者链接表、身份核验原始标识符证据，含直接身份信息。 |
+| 文件                                      | 粒度及用途                                                                  |
+| --------------------------------------- | ---------------------------------------------------------------------- |
+| `patient_manifest.csv`                  | 保留 CSV 每一行；PDF/解析/section 数与可靠时间范围。`n_pdf` 计唯一内容，`n_source_pdf` 计所有来源。 |
+| `document_index.csv`                    | 每个来源 PDF 一行，包括重复、未匹配和失败来源；重复行的 `duplicate_of` 指向 canonical 文档。         |
+| `section_index.csv`                     | 每个 canonical 文档分段一行；类型、日期、日期来源、页/行/字符定位、质量标记和正文引用。                     |
+| `patient_timeline.csv`                  | 患者匹配明确且日期有模板依据的 section，按患者、时间排序。不是医学事件金标准。                            |
+| `page_index.csv`                        | 每页原始字符数、处理状态、OCR 状态和置信度汇总。                                             |
+| `date_mentions.csv`                     | 正文所有可识别日期与证据，分开存放；这些日期不会自动进入时间线。                                       |
+| `extracted/<document_id>.json`          | 原生 PDF 原文、页边界、文字坐标、页级质量诊断，不被 OCR 覆盖。                                   |
+| `normalized/<document_id>.json`         | raw、OCR、normalized 三种表示及映射；删除行与原因可查。                                   |
+| `normalized/<document_id>.txt`          | 可阅读文本，带显式页面标记和换页符。                                                     |
+| `sections/<document_id>.json`           | 完整分段正文、逐页 span、日期 evidence 与 mention。                                  |
+| `qc/`                                   | 缺失患者/未匹配文件/身份问题、解析问题、重复来源、日期不确定、OCR 队列、行覆盖账本与 cohort 汇总。               |
+| `source_inventory.csv`                  | 输入路径、SHA256、结束时不变性核验。                                                  |
+| `run_metadata.json`、`logs/pipeline.log` | 配置、软件/模型版本、运行状态、计数与过程日志。                                               |
+| `private/`                              | 本地患者链接表、身份核验原始标识符证据，含直接身份信息。                                           |
 
 `text_path` 相对于该次运行输出根目录；`text_reference` 是对应 JSON 的指针，例如 `/sections/3/text`。页码、行号是 1-based；`page_spans` 的字符 offset 是 normalized page text 的 0-based、右端不含区间。`normalized_line_map` 按 `normalized_text_source` 指向原生提取文本或 OCR 行。
+
+### 研究浏览界面
+
+`case_explorer/` 是独立的本地只读浏览模块，可按 snapshot 动态呈现数据总览、病例队列、患者时间线、章节原文和原 PDF 页。它会发现 `data/derived/` 下兼容的完整运行；未来新增的年份、类别、状态与记录会从数据中自动识别。
+
+从仓库根目录启动：
+
+```powershell
+python -X utf8 -m case_explorer `
+  --data-root data/derived `
+  --run data/derived/v0.1_full `
+  --sidecar-root data/derived `
+  --port 8765
+```
+
+访问 `http://127.0.0.1:8765/`。省略 `--run` 时自动选择最新兼容快照。服务只绑定本机回环地址；默认展示伪名化患者 ID。详细 schema 契约、API、热重载和验证方式见 [`case_explorer/README.md`](case_explorer/README.md)。
 
 Section 处理依次为 **boundary detection → `section_type` classification → `section_subtype` classification → `section_title` extraction/normalization**。`section_type` 是粗粒度文书类；原 `surgery_related` 已改名为 `procedure`，覆盖手术、操作及床旁超声等记录。`section_subtype` 是新增的细分角色字段，不参与切分；不能可靠细分时为空字符串。`nonclinical` 用于明确的网页导航、检验导出首页、空白页和仅剩机构/身份抬头的片段；`unknown` 留给仍无法判断的内容。仅含 `nonclinical` section 的 PDF，其 `document_type` 也为 `nonclinical`。`nonclinical` 不提供文书日期，也不进入临床时间线。
 
 检验报告仍以每个 `申请项目:`（包括前有少量 bullet/图标的形式）为边界。`section_title` 优先保留明确的申请项目名称；项目名空缺时，只在项目组合足够明确时恢复“血气分析”或单项检查名，如 `NT-proBNP`、`HS-CTNI`、`血浆肝素含量`。`blood_gas`、`cardiac_biomarker`、`anticoagulation_monitoring`、`mixed_panel` 等属于 `section_subtype`，不代替具体标题。门诊文书也可由就诊日期、科室、主诉、现病史及治疗计划的完整字段组合识别；同一门诊段内再次出现不同的就诊时间和完整的门诊抬头、主诉及现病史时，也视为新就诊，不要求独立标题。新增边界会使后续 section 的序号及 `section_id` 重新编号，使用旧版导出时应重新运行分段。
 
-| `section_type` | 当前可判定的 `section_subtype` 示例 |
-|---|---|
-| `progress` | `initial_progress`、`daily_progress`、`round`、`first_round`、`critical_round`、`transfer`、`case_discussion`、`postop_progress`、`procedure_imaging_progress`、`antibiotic_adjustment` |
-| `administrative` | `treatment_procedure_consent`、`condition_communication`、`admission_notice`、`research_consent`、`leave_commitment`、`infection_control_commitment` |
-| `procedure` | `procedure`、`invasive_procedure`、`bedside_ultrasound`、`surgery_record`、`preoperative_discussion` |
-| `laboratory` | `blood_gas`、`cardiac_biomarker`、`anticoagulation_monitoring`、`mixed_panel` |
+| `section_type`   | 当前可判定的 `section_subtype` 示例                                                                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `progress`       | `initial_progress`、`daily_progress`、`round`、`first_round`、`critical_round`、`transfer`、`case_discussion`、`postop_progress`、`procedure_imaging_progress`、`antibiotic_adjustment` |
+| `administrative` | `treatment_procedure_consent`、`condition_communication`、`admission_notice`、`research_consent`、`leave_commitment`、`infection_control_commitment`                                |
+| `procedure`      | `procedure`、`invasive_procedure`、`bedside_ultrasound`、`surgery_record`、`preoperative_discussion`                                                                               |
+| `laboratory`     | `blood_gas`、`cardiac_biomarker`、`anticoagulation_monitoring`、`mixed_panel`                                                                                                     |
 
 `section_subtype` 同时出现在 `section_index.csv` 与 section JSON；时间线以 `event_subtype` 携带同一角色。已知的 `nonclinical` 段不进入待判文书和日期复核队列；损坏页警告仍保留在 section flags 和页级 QC 中。
 
