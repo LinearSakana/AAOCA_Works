@@ -144,3 +144,15 @@ Acceptance receipts: `node --check case_explorer/static/app.js` passed; all 5 ex
 ### Repository entrypoint documentation
 
 Updated the root `README.md` with the standalone browser's purpose, dynamic snapshot behavior, loopback URL, and copyable launch command, linking to `case_explorer/README.md` for the full contract. Included the pre-existing Markdown table-formatting cleanup in that same documentation commit; no pipeline or derived data changed.
+
+## 2026-10-13 — AAOCA management unknown failure audit, correction batch 1
+
+Reopened the deterministic management implementation and real source sections after concrete `unknown` failure reports. Kept raw PDFs, `v0.1_full`, and the relevance-review package read-only. Built all audit scripts and candidate outputs under Git-ignored `scratch/`; `.agy-staff/` was already excluded in `.git/info/exclude`.
+
+Generated a 33-case stratified baseline-unknown audit spanning refusal/cancellation terms, multidisciplinary observation, generic intent, possible AAOCA-operation language, unrelated operations, ordinary follow-up, and no-candidate records. Direct source review showed that the misses were not one class: explicit multidisciplinary refusal should become `intended_surgery`; a completed diagnostic catheterisation followed by a documented observation/follow-up decision should become `conservative`; and completed VSD/PFO surgery alone must remain non-AAOCA evidence rather than becoming `surgery` or automatically becoming `conservative`.
+
+Updated deterministic ruleset version to `aaoca_management_rules_v1.1`. Added bounded rules for multidisciplinary refusal, post-workup observation, recommendation followed by family deferral/discharge, no near-term intervention, and formal intraoperative coronary assessment explicitly documented as untreated. Added OCR line-wrap tolerance, a competing-lesion guard, a diagnostic “手术造影检查” negative boundary, section-date policy for management decisions, and an ordered trajectory rule so a later explicit observation decision can supersede earlier conditional intent without changing `actual_aaoca_surgery` to `no`.
+
+Expanded synthetic regression coverage with both positive and negative cases. The real candidate remained at 112 deduplicated AAOCA surgery events among 111 surgery patients. Patient states changed from `111 surgery / 11 intended / 20 conservative / 88 unknown` to `111 / 13 / 29 / 77`; transitions were 3 unknown-to-intended, 8 unknown-to-conservative, and 1 intended-to-conservative. `actual_aaoca_surgery` changed from `111 yes / 9 no / 110 unknown` to `111 / 12 / 107`; each added `no` has explicit coronary-not-treated wording.
+
+Batch-1 acceptance: all 77 repository tests passed; the base snapshot validator returned 0 errors/0 warnings; the candidate management validator returned 0 errors/0 warnings for 230 patients, 1,656 evidence rows and 112 surgery events. Tracked documentation was updated in `docs/aaoca_management.md` and `reports/aaoca_management_rules_v1_1_correction_2026-10-13.md`. Patient text remained local; no patient detail was used in public literature queries.

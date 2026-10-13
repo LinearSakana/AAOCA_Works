@@ -28,7 +28,7 @@ from typing import Iterable, Protocol
 from .io_utils import sha256_file, write_csv, write_json, write_text
 
 
-RULESET_VERSION = "aaoca_management_rules_v1"
+RULESET_VERSION = "aaoca_management_rules_v1.1"
 SCHEMA_VERSION = "aaoca_management_v1"
 
 MANAGEMENT_VALUES = {"surgery", "intended_surgery", "conservative", "unknown"}
@@ -342,20 +342,22 @@ def load_sections(run_root: Path, patient_ids: set[str]) -> list[dict]:
 
 AAOCA_ANCHOR_RE = re.compile(
     r"AAOCA|冠(?:状动)?脉.{0,35}(?:异常起源|起源异常|异位起源|开口异常|壁内走行)|"
-    r"(?:左|右)冠(?:状动脉)?.{0,25}(?:起自|起源于|发自).{0,25}(?:冠窦|主动脉|肺动脉)",
+    r"(?:左|右)冠(?:状动脉)?起源异常|"
+    r"(?:左|右)冠(?:状动脉)?.{0,25}(?:起自|起源(?:于)?|发自).{0,25}(?:冠窦|主动脉|肺动脉)",
     re.IGNORECASE | re.DOTALL,
 )
 
 SPECIFIC_AAOCA_DIAG_RE = re.compile(
     r"AAOCA|AORCA|ALCA(?:PA)?|冠状动脉起源异常|冠脉起源异常|冠状动脉异常起源|冠脉异常起源|"
-    r"(?:左|右)冠(?:状动脉)?.{0,18}(?:起自|起源于|发自).{0,18}(?:冠窦|主动脉)",
+    r"(?:左|右)冠(?:状动脉)?起源异常|"
+    r"(?:左|右)冠(?:状动脉)?.{0,18}(?:起自|起源(?:于)?|发自).{0,18}(?:冠窦|主动脉)",
     re.I | re.DOTALL,
 )
 
 OTHER_SURGICAL_LESION_RE = re.compile(
     r"房间隔缺损|室间隔缺损|房室间隔缺损|动脉导管未闭|肺静脉异位引流|主动脉缩窄|"
     r"右室流出道狭窄|法洛四联症|肺动脉瓣狭窄|二尖瓣.{0,5}(?:关闭不全|反流|狭窄)|"
-    r"三尖瓣.{0,5}(?:关闭不全|反流|狭窄)",
+    r"三尖瓣.{0,5}(?:关闭不全|反流|狭窄)|主动脉瓣.{0,5}(?:关闭不全|反流|狭窄)",
     re.I | re.DOTALL,
 )
 
@@ -408,6 +410,45 @@ COMPLETION_CUE_RE = re.compile(
     re.I | re.DOTALL,
 )
 CANCEL_CUE_RE = re.compile(r"取消|暂缓|拒绝|放弃|未行|未能行|终止", re.I)
+
+MULTIDISCIPLINARY_DECLINE_RE = re.compile(
+    r"(?:患儿)?(?:经|与|由|昨日与)?(?:心脏)?(?:内外科|心外科|胸外科)"
+    r"[^。；;]{0,45}(?:讨论|会诊)(?:后|结束后)?[^。；;]{0,190}"
+    r"(?:家属[^。；;]{0,80})?(?:拒绝|放弃)[^。；;]{0,12}手术",
+    re.I | re.DOTALL,
+)
+
+MULTIDISCIPLINARY_OBSERVATION_RE = re.compile(
+    r"(?:经|与|请|昨日与|后于\s*\d{1,2}(?:[./-]\d{1,2})?\s*进行)?(?:心脏)?"
+    r"(?:内外科|心外科|胸外科|外科)[^。；;]{0,45}(?:讨论|会诊)(?:后|结束后)?"
+    r"[^。；;]{0,190}(?:出院观\s*察|随访观\s*察|定期(?:门诊)?随\s*访|门诊随\s*访|定期复\s*查)",
+    re.I | re.DOTALL,
+)
+
+MULTIDISCIPLINARY_SURGERY_DEFERRED_RE = re.compile(
+    r"(?:心脏)?(?:内外科|心外科|胸外科)[^。；;]{0,45}讨论[^。；;]{0,35}"
+    r"建议[^。；;]{0,12}手术[^。；;]{0,110}"
+    r"(?:家属[^。；;]{0,35}(?:考虑|暂缓|不同意)|办理出院|心外科门诊随\s*访)",
+    re.I | re.DOTALL,
+)
+
+AAOCA_PENDING_SURGERY_DISCHARGE_RE = re.compile(
+    r"(?:拟|计划|建议|需|需要)[^。；;]{0,38}(?:择日|择期)?[^。；;]{0,10}"
+    r"手术(?:治疗|干预)?[^。；;]{0,130}(?:家属[^。；;]{0,65})?"
+    r"(?:要求|决定|办理)[^。；;]{0,12}出院",
+    re.I | re.DOTALL,
+)
+
+AAOCA_NO_NEAR_TERM_INTERVENTION_RE = re.compile(
+    r"(?:AAOCA|AORCA|冠(?:状动)?脉起源异常|(?:左|右)冠(?:状动脉)?起源异常)"
+    r"[^。；;]{0,120}(?:暂无需|无需|不需)[^。；;]{0,35}(?:外科)?干预",
+    re.I | re.DOTALL,
+)
+
+INTRAOPERATIVE_CORONARY_UNTREATED_RE = re.compile(
+    r"(?:冠状动脉|冠脉|左冠|右冠)[^。；;]{0,100}(?:未予处理|未处理|不予处理)",
+    re.I | re.DOTALL,
+)
 
 
 def _procedure_types(value: str) -> list[str]:
@@ -523,6 +564,7 @@ def _evidence_row(
     start: int,
     end: int,
     extra_flags: Iterable[str] = (),
+    date_policy: str = "contextual",
 ) -> dict:
     text = section.get("text", "")
     clip_start = max(0, start - 180)
@@ -531,6 +573,20 @@ def _evidence_row(
     evidence_date, date_precision, date_role, date_status, date_candidates, date_flags = _date_evidence(
         section, clip_start, clip_end, completed
     )
+    if date_policy == "section" and section.get("section_date"):
+        evidence_date = section["section_date"]
+        date_precision = (
+            "day"
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", evidence_date)
+            else "month"
+            if re.fullmatch(r"\d{4}-\d{2}", evidence_date)
+            else "unknown"
+        )
+        date_role = "decision_documented"
+        date_status = "known" if date_precision == "day" else "partial" if date_precision == "month" else "unknown"
+        date_candidates = list(dict.fromkeys([evidence_date, *date_candidates]))
+    elif date_policy not in {"contextual", "section"}:
+        raise ValueError(f"Unsupported evidence date policy: {date_policy}")
     flags = list(dict.fromkeys([*extra_flags, *date_flags]))
     evidence_id = _stable_id(
         "mge",
@@ -749,6 +805,163 @@ class DeterministicManagementEvidenceExtractor:
     def _extract_nonoperative_decisions(self, section: dict, has_operation_field: bool) -> list[dict]:
         text = section.get("text", "")
         rows: list[dict] = []
+
+        # Some discharge/progress narratives state only "the operation" after
+        # an AAOCA diagnosis established earlier in the same section.  Requiring
+        # the diagnosis and refusal to fit in one short regex window lost clear
+        # multidisciplinary decisions, while matching every generic refusal
+        # would incorrectly attach VSD/valve operations to AAOCA.  The local
+        # competing-lesion guard keeps this fallback narrow.
+        for match in MULTIDISCIPLINARY_DECLINE_RE.finditer(text):
+            if not SPECIFIC_AAOCA_DIAG_RE.search(text):
+                continue
+            window = text[max(0, match.start() - 260): min(len(text), match.end() + 260)]
+            if OTHER_SURGICAL_LESION_RE.search(window):
+                continue
+            rows.append(
+                _evidence_row(
+                    section,
+                    rule_id="aaoca_multidisciplinary_surgery_declined",
+                    assertion="cancelled_or_declined",
+                    event_kind="surgical_intent",
+                    strength="high",
+                    relation="definite",
+                    counts_as_surgery=False,
+                    procedure_name="",
+                    procedure_types=[],
+                    start=match.start(),
+                    end=match.end(),
+                    date_policy="section",
+                )
+            )
+
+        # A documented decision after cardiac-surgical review to observe or
+        # follow the anomalous coronary is affirmative conservative-management
+        # evidence.  It remains medium strength: it proves the current pathway,
+        # not that AAOCA surgery never occurred at another time.
+        for match in MULTIDISCIPLINARY_OBSERVATION_RE.finditer(text):
+            relation_window = text[max(0, match.start() - 500): min(len(text), match.end() + 300)]
+            if not AAOCA_ANCHOR_RE.search(text):
+                continue
+            if OTHER_SURGICAL_LESION_RE.search(relation_window) and not AAOCA_ANCHOR_RE.search(relation_window):
+                continue
+            if re.search(r"建议\s*手术|(?:拟|计划|需|需要)[^。；;]{0,12}手术", match.group(0), re.I | re.DOTALL):
+                continue
+            if re.search(r"(?:会诊|胸外科)[^。；;]{0,35}或[^。；;]{0,35}随\s*访", match.group(0), re.I | re.DOTALL):
+                continue
+            rows.append(
+                _evidence_row(
+                    section,
+                    rule_id="aaoca_multidisciplinary_observation",
+                    assertion="conservative",
+                    event_kind="management_decision",
+                    strength="medium",
+                    relation="definite",
+                    counts_as_surgery=False,
+                    procedure_name="",
+                    procedure_types=[],
+                    start=match.start(),
+                    end=match.end(),
+                    date_policy="section",
+                )
+            )
+
+        # Conversely, "discussion recommended surgery; family will consider it"
+        # is explicit intent, not conservative follow-up and not completion.
+        for match in MULTIDISCIPLINARY_SURGERY_DEFERRED_RE.finditer(text):
+            window = text[max(0, match.start() - 320): min(len(text), match.end() + 220)]
+            if not AAOCA_ANCHOR_RE.search(text) or OTHER_SURGICAL_LESION_RE.search(window):
+                continue
+            rows.append(
+                _evidence_row(
+                    section,
+                    rule_id="aaoca_surgery_recommended_family_deferred",
+                    assertion="intended",
+                    event_kind="surgical_intent",
+                    strength="high",
+                    relation="definite",
+                    counts_as_surgery=False,
+                    procedure_name="",
+                    procedure_types=[],
+                    start=match.start(),
+                    end=match.end(),
+                    date_policy="section",
+                )
+            )
+
+        # Discharge before a clearly documented AAOCA operation can still prove
+        # intent even if the record never names a specific repair technique.
+        for match in AAOCA_PENDING_SURGERY_DISCHARGE_RE.finditer(text):
+            window = text[max(0, match.start() - 260): min(len(text), match.end() + 180)]
+            if not SPECIFIC_AAOCA_DIAG_RE.search(text):
+                continue
+            if (
+                OTHER_SURGICAL_LESION_RE.search(window)
+                or DIAGNOSTIC_PROCEDURE_RE.search(match.group(0))
+                or re.search(r"手术[^。；;]{0,8}(?:造影|检查)", match.group(0), re.I | re.DOTALL)
+            ):
+                continue
+            rows.append(
+                _evidence_row(
+                    section,
+                    rule_id="aaoca_planned_surgery_discharge_before_completion",
+                    assertion="intended",
+                    event_kind="surgical_intent",
+                    strength="high",
+                    relation="definite",
+                    counts_as_surgery=False,
+                    procedure_name="",
+                    procedure_types=[],
+                    start=match.start(),
+                    end=match.end(),
+                    date_policy="section",
+                )
+            )
+
+        for match in AAOCA_NO_NEAR_TERM_INTERVENTION_RE.finditer(text):
+            rows.append(
+                _evidence_row(
+                    section,
+                    rule_id="aaoca_no_near_term_intervention",
+                    assertion="conservative",
+                    event_kind="management_decision",
+                    strength="medium",
+                    relation="definite",
+                    counts_as_surgery=False,
+                    procedure_name="",
+                    procedure_types=[],
+                    start=match.start(),
+                    end=match.end(),
+                    date_policy="section",
+                )
+            )
+
+        # A formal operation that inspected the coronary anatomy and explicitly
+        # says it was not treated supports non-operative AAOCA management for
+        # that encounter.  Merely listing VSD/PFO repair without this statement
+        # is intentionally insufficient and remains an unrelated-operation
+        # boundary rather than conservative evidence.
+        if section.get("section_subtype") in {"surgery_record", "postop_progress"} and (
+            SPECIFIC_AAOCA_DIAG_RE.search(text) or re.search(r"冠状动脉畸形", text, re.I)
+        ):
+            for match in INTRAOPERATIVE_CORONARY_UNTREATED_RE.finditer(text):
+                rows.append(
+                    _evidence_row(
+                        section,
+                        rule_id="aaoca_intraoperative_assessment_not_treated",
+                        assertion="conservative",
+                        event_kind="management_decision",
+                        strength="high",
+                        relation="definite",
+                        counts_as_surgery=False,
+                        procedure_name="",
+                        procedure_types=[],
+                        start=match.start(),
+                        end=match.end(),
+                        date_policy="section",
+                    )
+                )
+
         patterns = [
             (
                 "aaoca_explicit_nonoperative_plan",
@@ -1140,6 +1353,23 @@ def _latest_date(rows: Iterable[dict]) -> str:
     return max((row.get("evidence_date", "") for row in rows if row.get("evidence_date")), default="")
 
 
+def _evidence_at_or_after(candidate: dict, earlier: dict) -> bool:
+    """Conservatively order two assertions from the same longitudinal record."""
+
+    candidate_date = candidate.get("evidence_date", "")
+    earlier_date = earlier.get("evidence_date", "")
+    if candidate_date and earlier_date:
+        return candidate_date >= earlier_date
+    if candidate.get("section_id") == earlier.get("section_id"):
+        return int(candidate.get("char_start", 0)) >= int(earlier.get("char_start", 0))
+    if candidate.get("document_id") == earlier.get("document_id"):
+        candidate_match = re.search(r"_s(\d+)$", candidate.get("section_id", ""))
+        earlier_match = re.search(r"_s(\d+)$", earlier.get("section_id", ""))
+        if candidate_match and earlier_match:
+            return int(candidate_match.group(1)) >= int(earlier_match.group(1))
+    return False
+
+
 def _patient_summary(
     patient_id: str,
     judgment_source: str,
@@ -1170,12 +1400,22 @@ def _patient_summary(
             review_reasons.append("multiple_aaoca_surgery_events")
     else:
         explicit_conservative = [row for row in conservative if row["strength"] == "high"]
+        decisive_observation = [
+            row
+            for row in conservative
+            if row["rule_id"] in {"aaoca_multidisciplinary_observation", "aaoca_no_near_term_intervention"}
+        ]
         latest_intent = _latest_date([*intended, *cancelled])
         latest_explicit_conservative = _latest_date(explicit_conservative)
         conservative_supersedes = bool(
             explicit_conservative
             and (not latest_intent or (latest_explicit_conservative and latest_explicit_conservative >= latest_intent))
         )
+        if not conservative_supersedes and decisive_observation and (intended or cancelled):
+            conservative_supersedes = any(
+                all(_evidence_at_or_after(decision, earlier) for earlier in [*intended, *cancelled])
+                for decision in decisive_observation
+            )
         if (intended or cancelled) and not conservative_supersedes:
             management = "intended_surgery"
             surgery_status = "unknown"

@@ -1,4 +1,4 @@
-# AAOCA 实际治疗与手术整理（deterministic v1）
+# AAOCA 实际治疗与手术整理（deterministic v1.1）
 
 ## 1. 任务边界
 
@@ -112,6 +112,18 @@ python -X utf8 scripts/aaoca_management.py validate `
 - 明确“AAOCA/异常冠脉未处理”可支持保守阶段；只有历史“未予特殊治疗”或随访叙述时仍保留 `actual_aaoca_surgery=unknown`。
 - 同一次手术在多份文书中反复出现不会按文书日期生成多次事件；不同日期的正式手术记录会分别保留。
 - 规则允许只有术后/既往叙述而缺少正式手术记录的手术，但置信度降为 medium，并保留日期精度与复核原因。
+
+### v1.1 的出院决策与跨阶段规则
+
+2026-10-13 对原 `unknown` 做分层抽查后，补入了以下高精度路径；输出目录与 schema 不变，`ruleset_version` 更新为 `aaoca_management_rules_v1.1`：
+
+- 同一出院/病程 section 已有明确 AAOCA 诊断，且记录内外科讨论、手术风险评估和家属拒绝/放弃手术时，产生 `cancelled_or_declined`，patient-level 为 `intended_surgery`；仍然不能证明手术发生。
+- 冠脉评估后，心内外科/心外科明确形成出院观察、随访观察或定期门诊随访决定时，产生 medium-strength `conservative`；`actual_aaoca_surgery` 保留 `unknown`。
+- 内外科明确建议手术而家属表示考虑、暂缓或先出院时，产生 `intended`；“将讨论进一步方案”本身不产生 intent 或 conservative。
+- 正式手术记录/术后首次病程若明确记录冠脉探查后“未处理/未予处理”，可产生 high-strength `conservative`；同一文书只有 VSD/PFO/ASD 等无关手术而没有这种明确语句时仍为 `unknown`。
+- 同一纵向记录中，后续明确的多学科观察决定可以覆盖更早的条件性手术意向；它只改变当前 `observed_management`，不会把终身手术事实推断为 `no`。
+
+负向保护仍然优先：诊断性“手术造影检查”、其他结构性心脏病的手术/拒绝、普通专科随访、“胸外科会诊或门诊随访”这种尚未形成决定的二选一表述，以及无 AAOCA 局部语境的出院随访均不能触发上述规则。PDF/OCR 行内换行可以出现在“观察/随访”等词中，但字符 offset 仍指向原 section 文本。
 
 ## 6. QC 和解释边界
 

@@ -124,6 +124,58 @@ class ManagementTests(unittest.TestCase):
                 section_type="procedure",
                 subtype="surgery_record",
             ),
+            _section(
+                "p_declined_multidisciplinary",
+                "doc_declined_s0001",
+                "出院诊断：冠状动脉起源异常，左冠脉起源于右冠窦。经内外科讨论，"
+                "患儿病情危重，考虑手术风险极大，经反复告知家属后，家属决定自动出院，拒绝手术。",
+                section_type="discharge",
+            ),
+            _section(
+                "p_discussion_observe",
+                "doc_observe_s0001",
+                "右冠状动脉起源于左冠窦伴心肌缺血可能需手术治疗。冠脉造影示左右冠脉未见明显受压。"
+                "后进行心脏内外科讨论，"
+                "讨论结束后胸外科医生与家属沟通，家属要求先出院观察，心血管内科门诊随访，定期复查。",
+                section_type="discharge",
+            ),
+            _section(
+                "p_discussion_pending",
+                "doc_pending_s0001",
+                "右冠状动脉起源于左冠窦。今日完成心导管检查，待结果回报后心脏内外科讨论进一步诊疗计划。"
+                "患儿一般情况可，予出院，普通门诊随访。",
+                section_type="discharge",
+            ),
+            _section(
+                "p_recommended_deferred",
+                "doc_recommended_s0001",
+                "出院诊断：冠状动脉起源异常。患儿心内外科讨论建议手术，家属表示再考虑，"
+                "办理出院，心外科门诊随访。",
+                section_type="discharge",
+            ),
+            _section(
+                "p_other_untreated",
+                "doc_other_untreated_s0001",
+                "手术记录。术中诊断：房间隔缺损、冠状动脉畸形。手术名称：ASD修补术。"
+                "术中探查见冠状动脉开口未见明显异常，未处理。术顺。",
+                section_type="procedure",
+                subtype="surgery_record",
+            ),
+            _section(
+                "p_other_only",
+                "doc_other_only_s0001",
+                "手术记录。术前诊断：VSD/PFO/单支左冠。手术名称：1.VSD修补2.PFO修补。"
+                "术后食道超声无残余分流，术顺。",
+                section_type="procedure",
+                subtype="surgery_record",
+            ),
+            _section(
+                "p_other_lesion_refusal",
+                "doc_other_refusal_s0001",
+                "诊断包括右冠状动脉起源于左冠窦。患儿主动脉瓣重度狭窄，心胸外科考虑急诊手术，"
+                "告知风险后家长拒绝手术，自动出院。",
+                section_type="discharge",
+            ),
         ]
         patient_ids = [
             "p_surgery",
@@ -134,6 +186,13 @@ class ManagementTests(unittest.TestCase):
             "p_untreated",
             "p_cancelled",
             "p_multi",
+            "p_declined_multidisciplinary",
+            "p_discussion_observe",
+            "p_discussion_pending",
+            "p_recommended_deferred",
+            "p_other_untreated",
+            "p_other_only",
+            "p_other_lesion_refusal",
             "p_excluded",
         ]
         write_json(run / "run_metadata.json", {"status": "complete"})
@@ -164,7 +223,7 @@ class ManagementTests(unittest.TestCase):
             {
                 "human_deliverable_scope": "exception_patients_only",
                 "exception_patients": 1,
-                "nonexception_patients": 8,
+                "nonexception_patients": 15,
                 "source_run_metadata_sha256": sha256_file(run / "run_metadata.json"),
                 "source_patient_manifest_sha256": sha256_file(run / "patient_manifest.csv"),
                 "source_section_index_sha256": sha256_file(run / "section_index.csv"),
@@ -254,6 +313,58 @@ class ManagementTests(unittest.TestCase):
         )
         self.assertNotIn("intended", {row["assertion"] for row in extractor.extract(unrelated_plan)})
 
+        multidisciplinary_decline = _section(
+            "p",
+            "doc_m_s0001",
+            "出院诊断：冠状动脉起源异常。经内外科讨论，考虑手术风险极大，"
+            "经反复告知家属后，家属决定自动出院，拒绝手术。",
+            section_type="discharge",
+        )
+        decline_rows = extractor.extract(multidisciplinary_decline)
+        self.assertIn(
+            "aaoca_multidisciplinary_surgery_declined",
+            {row["rule_id"] for row in decline_rows},
+        )
+        self.assertNotIn("completed", {row["assertion"] for row in decline_rows})
+        self.assertTrue(all(row["evidence_date"] == "2024-05-02" for row in decline_rows))
+
+        observation_after_discussion = _section(
+            "p",
+            "doc_n_s0001",
+            "右冠状动脉起源于左冠窦伴心肌缺血可能需手术治疗。造影示左右冠脉未见明显受压。"
+            "后进行心脏内外科讨论，"
+            "讨论结束后胸外科医生与家属沟通，家属要求先出院观察，心血管内科门诊随访，定期复查。",
+            section_type="discharge",
+        )
+        observation_rows = extractor.extract(observation_after_discussion)
+        self.assertIn(
+            "aaoca_multidisciplinary_observation",
+            {row["rule_id"] for row in observation_rows},
+        )
+
+        unrelated_refusal = _section(
+            "p",
+            "doc_o_s0001",
+            "诊断包括右冠状动脉起源于左冠窦。患儿主动脉瓣重度狭窄，"
+            "心胸外科考虑急诊手术，告知风险后家长拒绝手术。",
+            section_type="discharge",
+        )
+        self.assertNotIn(
+            "aaoca_multidisciplinary_surgery_declined",
+            {row["rule_id"] for row in extractor.extract(unrelated_refusal)},
+        )
+
+        diagnostic_discharge_template = _section(
+            "p",
+            "doc_p_s0001",
+            "冠状动脉起源异常待查，患儿拟择期手术造影检查，术后一般情况可办理出院。",
+            section_type="progress",
+        )
+        self.assertNotIn(
+            "aaoca_planned_surgery_discharge_before_completion",
+            {row["rule_id"] for row in extractor.extract(diagnostic_discharge_template)},
+        )
+
         electrophysiology_risk_plan = _section(
             "p",
             "doc_j_s0001",
@@ -296,7 +407,7 @@ class ManagementTests(unittest.TestCase):
             self.assertEqual(result["validation"]["validation_status"], "passed")
             with (output / "management_summary.csv").open(encoding="utf-8-sig", newline="") as handle:
                 rows = {row["patient_id"]: row for row in csv.DictReader(handle)}
-            self.assertEqual(len(rows), 8)
+            self.assertEqual(len(rows), 15)
             self.assertNotIn("p_excluded", rows)
             self.assertEqual(rows["p_surgery"]["observed_management"], "surgery")
             self.assertEqual(rows["p_surgery"]["n_surgery_events"], "1")
@@ -309,6 +420,16 @@ class ManagementTests(unittest.TestCase):
             self.assertEqual(rows["p_untreated"]["has_unrelated_surgery_evidence"], "True")
             self.assertEqual(rows["p_cancelled"]["observed_management"], "intended_surgery")
             self.assertEqual(rows["p_multi"]["n_surgery_events"], "2")
+            self.assertEqual(rows["p_declined_multidisciplinary"]["observed_management"], "intended_surgery")
+            self.assertEqual(rows["p_discussion_observe"]["observed_management"], "conservative")
+            self.assertEqual(rows["p_discussion_observe"]["actual_aaoca_surgery"], "unknown")
+            self.assertEqual(rows["p_discussion_pending"]["observed_management"], "unknown")
+            self.assertEqual(rows["p_recommended_deferred"]["observed_management"], "intended_surgery")
+            self.assertEqual(rows["p_other_untreated"]["observed_management"], "conservative")
+            self.assertEqual(rows["p_other_untreated"]["actual_aaoca_surgery"], "no")
+            self.assertEqual(rows["p_other_only"]["observed_management"], "unknown")
+            self.assertEqual(rows["p_other_only"]["has_unrelated_surgery_evidence"], "True")
+            self.assertEqual(rows["p_other_lesion_refusal"]["observed_management"], "unknown")
 
     def test_completed_human_relevance_label_overrides_automatic(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -320,7 +441,7 @@ class ManagementTests(unittest.TestCase):
             selection, receipt = resolve_aaoca_cohort(run, review)
             selected = {row["patient_id"] for row in selection if row["included_for_management"]}
             self.assertIn("p_excluded", selected)
-            self.assertEqual(receipt["included_patients"], 9)
+            self.assertEqual(receipt["included_patients"], 16)
 
     def test_validator_detects_evidence_span_tampering(self):
         with tempfile.TemporaryDirectory() as temp:
