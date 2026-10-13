@@ -1436,9 +1436,17 @@ def _patient_summary(
             management = "unknown"
             surgery_status = "unknown"
             rule = "insufficient_management_evidence"
-            primary = max(diagnostics, key=_evidence_priority) if diagnostics else None
+            # Keep the strongest exclusion-boundary evidence directly reachable
+            # from the patient summary.  A diagnostic procedure is the most
+            # informative boundary when present; otherwise a completed unrelated
+            # operation is still valuable evidence for why the case was *not*
+            # promoted to AAOCA surgery.
+            primary_candidates = diagnostics if diagnostics else unrelated
+            primary = max(primary_candidates, key=_evidence_priority) if primary_candidates else None
             confidence = "low"
             review_reasons.append("no_completed_intent_or_conservative_evidence")
+            if unrelated:
+                review_reasons.append("unrelated_completed_operation_not_aaoca_management")
 
     if intended and conservative:
         review_reasons.append("mixed_intent_and_conservative_evidence")
@@ -1479,10 +1487,28 @@ def _patient_summary(
                 "observed_management": management,
                 "issue_type": "management_unknown",
                 "severity": "high",
-                "evidence_ids": [row["evidence_id"] for row in diagnostics],
-                "detail": "No reliable completed surgery, surgical intent, or explicit conservative-management evidence.",
+                "evidence_ids": [row["evidence_id"] for row in [*diagnostics, *unrelated]],
+                "detail": (
+                    "No reliable completed AAOCA surgery, AAOCA surgical intent, or explicit "
+                    "conservative-management evidence. Diagnostic procedures and completed unrelated "
+                    "operations, when present, are retained only as exclusion-boundary evidence."
+                ),
             }
         )
+        if unrelated:
+            qc.append(
+                {
+                    "patient_id": patient_id,
+                    "observed_management": management,
+                    "issue_type": "unrelated_operation_without_aaoca_management",
+                    "severity": "high",
+                    "evidence_ids": [row["evidence_id"] for row in unrelated],
+                    "detail": (
+                        "A completed non-AAOCA operation is documented, but the record does not establish "
+                        "whether AAOCA was treated or deliberately managed without surgery."
+                    ),
+                }
+            )
     for event in events:
         for flag in _json_list(event.get("conflict_flags")):
             if flag in {"surgery_date_unknown", "section_and_surgery_date_conflict", "multiple_surgery_time_dates"}:

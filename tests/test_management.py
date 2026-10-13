@@ -429,7 +429,18 @@ class ManagementTests(unittest.TestCase):
             self.assertEqual(rows["p_other_untreated"]["actual_aaoca_surgery"], "no")
             self.assertEqual(rows["p_other_only"]["observed_management"], "unknown")
             self.assertEqual(rows["p_other_only"]["has_unrelated_surgery_evidence"], "True")
+            self.assertTrue(rows["p_other_only"]["primary_evidence_id"])
+            self.assertIn(
+                "unrelated_completed_operation_not_aaoca_management",
+                json.loads(rows["p_other_only"]["review_reasons"]),
+            )
             self.assertEqual(rows["p_other_lesion_refusal"]["observed_management"], "unknown")
+            with (output / "qc" / "review_queue.csv").open(encoding="utf-8-sig", newline="") as handle:
+                qc_rows = list(csv.DictReader(handle))
+            other_only_issues = {
+                row["issue_type"] for row in qc_rows if row["patient_id"] == "p_other_only"
+            }
+            self.assertIn("unrelated_operation_without_aaoca_management", other_only_issues)
 
     def test_completed_human_relevance_label_overrides_automatic(self):
         with tempfile.TemporaryDirectory() as temp:

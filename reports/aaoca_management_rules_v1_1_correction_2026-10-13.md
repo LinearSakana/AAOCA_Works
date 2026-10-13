@@ -21,7 +21,7 @@ Synthetic positive and negative controls cover:
 
 - multidisciplinary AAOCA refusal versus refusal of an aortic-valve operation;
 - a completed diagnostic procedure followed by explicit observation versus a plan merely to discuss next steps;
-- explicit surgery recommendation/family deferral versus a diagnostic procedure called a “手术”; 
+- explicit surgery recommendation/family deferral versus a diagnostic procedure called a “手术”;
 - formal coronary inspection explicitly ending in no treatment versus VSD/PFO repair alone;
 - a later post-workup observation decision superseding an earlier conditional surgery statement without asserting lifetime absence of surgery.
 
@@ -36,7 +36,13 @@ Synthetic positive and negative controls cover:
 
 The transition matrix contains 3 `unknown -> intended_surgery`, 8 `unknown -> conservative`, and 1 `intended_surgery -> conservative` after later completed evaluation and follow-up decision. The separate `actual_aaoca_surgery` distribution changed from `111 yes / 9 no / 110 unknown` to `111 yes / 12 no / 107 unknown`; all three new `no` values have explicit coronary-not-treated evidence rather than an inference from missing surgery records.
 
-The operation layer is unchanged: 112 deduplicated AAOCA surgery events among 111 patients. The candidate contains 1,656 provenance-bearing evidence rows and 191 QC rows. The unchanged surgery/event counts are an important regression check: none of the new refusal, observation, diagnostic, or unrelated-operation paths created a completed AAOCA surgery event.
+The operation layer is unchanged: 112 deduplicated AAOCA surgery events among 111 patients. The final candidate contains 1,656 provenance-bearing evidence rows and 209 QC rows. The unchanged surgery/event counts are an important regression check: none of the new refusal, observation, diagnostic, or unrelated-operation paths created a completed AAOCA surgery event.
+
+## Unknown provenance correction
+
+The first correction batch intentionally left a detailed VSD/PFO/ASD operation as `unknown` when the record did not state whether the coronary anomaly was treated. The status is correct, but the v1 summary made such cases harder to review because an unrelated operation was not selected as primary evidence and the generic unknown queue could have an empty evidence list.
+
+The final v1.1 candidate now uses a diagnostic-procedure assertion as the primary unknown evidence when available, otherwise the strongest `unrelated_completed` assertion. It also adds `unrelated_completed_operation_not_aaoca_management` to the patient review reasons and a dedicated `unrelated_operation_without_aaoca_management` QC row. Eighteen of the 77 remaining `unknown` patients have this completed-other-operation boundary. Their statuses, `actual_aaoca_surgery=unknown`, evidence assertions, and the AAOCA surgery-event table are unchanged; only review traceability and QC routing changed.
 
 ## Acceptance at correction batch 1
 

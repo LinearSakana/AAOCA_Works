@@ -122,12 +122,13 @@ python -X utf8 scripts/aaoca_management.py validate `
 - 内外科明确建议手术而家属表示考虑、暂缓或先出院时，产生 `intended`；“将讨论进一步方案”本身不产生 intent 或 conservative。
 - 正式手术记录/术后首次病程若明确记录冠脉探查后“未处理/未予处理”，可产生 high-strength `conservative`；同一文书只有 VSD/PFO/ASD 等无关手术而没有这种明确语句时仍为 `unknown`。
 - 同一纵向记录中，后续明确的多学科观察决定可以覆盖更早的条件性手术意向；它只改变当前 `observed_management`，不会把终身手术事实推断为 `no`。
+- 若只有已完成的 VSD/PFO/ASD 等非 AAOCA 手术，patient-level 仍保留 `unknown`；summary 的主证据会指向该排除性手术证据，QC 另列 `unrelated_operation_without_aaoca_management`，明确提示“做过手术”不等于“AAOCA 已处理或明确保守”。
 
 负向保护仍然优先：诊断性“手术造影检查”、其他结构性心脏病的手术/拒绝、普通专科随访、“胸外科会诊或门诊随访”这种尚未形成决定的二选一表述，以及无 AAOCA 局部语境的出院随访均不能触发上述规则。PDF/OCR 行内换行可以出现在“观察/随访”等词中，但字符 offset 仍指向原 section 文本。
 
 ## 6. QC 和解释边界
 
-复核原因包括：management 不明、只有意向而无完成证据、只有随访/观察、意向与保守阶段并存、多次手术、日期部分/冲突、OCR/date-review 来源以及无法唯一归并的完成证据。不同原因可在同一患者重叠。
+复核原因包括：management 不明、只有意向而无完成证据、只有随访/观察、已完成其他手术但 AAOCA management 仍无证据、意向与保守阶段并存、多次手术、日期部分/冲突、OCR/date-review 来源以及无法唯一归并的完成证据。不同原因可在同一患者重叠。
 
 这套结果证明的是规则执行、表间一致性、源 hash 和证据定位完整性，不是临床真值或抽取准确率。尚未冻结 management 人工 gold set，因此不能报告 sensitivity、specificity、PPV 或总体 accuracy。尤其要人工关注：
 
