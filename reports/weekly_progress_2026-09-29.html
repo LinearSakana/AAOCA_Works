@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="AAOCA 项目文本侧 2026 年 9 月 25 日至 29 日组会进展，含真实病例证据示例与本地交互演示入口。">
+  <title>AAOCA 文本侧周报 · 2026-09-29</title>
+  <style>
+    :root { --ink:#17323b; --muted:#5c7075; --teal:#087e78; --teal-dark:#075d59; --blue:#476d9d; --orange:#cf7438; --gold:#b17d1d; --line:#d9e3e3; --paper:#f3f6f5; --white:#fff; --pink:#aa5563; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; background:var(--paper); color:var(--ink); font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif; line-height:1.5; }
+    button, a { font:inherit; }
+    a { color:var(--teal-dark); }
+    a:hover { color:#044440; }
+    button:focus-visible, a:focus-visible, summary:focus-visible { outline:3px solid #e7a521; outline-offset:3px; }
+    .topbar { position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:20px; min-height:68px; padding:9px clamp(18px,4vw,58px); background:rgba(255,255,255,.97); border-bottom:1px solid var(--line); box-shadow:0 4px 18px #17323b0a; }
+    .brand { flex:0 0 auto; font-weight:800; font-size:15px; line-height:1.15; letter-spacing:.03em; color:var(--ink); text-decoration:none; }
+    .brand small { display:block; margin-top:3px; color:var(--muted); font-size:11px; font-weight:600; letter-spacing:0; }
+    .tabs { display:flex; gap:4px; overflow-x:auto; white-space:nowrap; scrollbar-width:thin; margin-left:auto; }
+    .tabs a { display:block; padding:9px 12px; border-radius:9px; color:var(--muted); text-decoration:none; font-size:13px; font-weight:700; }
+    .tabs a:hover, .tabs a[aria-current="page"] { background:#e3f1ef; color:var(--teal-dark); }
+    .tabs a[aria-current="page"] { box-shadow:inset 0 -3px 0 var(--teal); }
+    .page { max-width:1280px; min-height:calc(100vh - 124px); margin:0 auto; padding:clamp(24px,3.2vw,46px) clamp(22px,4vw,62px) 38px; }
+    .page[hidden] { display:none !important; }
+    .eyebrow { display:inline-flex; align-items:center; gap:8px; margin-bottom:9px; color:var(--teal-dark); font-weight:800; font-size:13px; letter-spacing:.08em; }
+    .eyebrow::before { content:""; width:9px; height:9px; border-radius:50%; background:var(--teal); }
+    h1, h2, h3, p { margin-top:0; }
+    h1 { max-width:1000px; margin-bottom:14px; font-size:clamp(32px,4.3vw,59px); letter-spacing:-.035em; line-height:1.17; }
+    h2 { margin-bottom:12px; font-size:clamp(29px,3.45vw,47px); line-height:1.2; letter-spacing:-.03em; }
+    h3 { margin-bottom:7px; font-size:18px; }
+    .lead { max-width:920px; color:#3e555b; font-size:clamp(16px,1.7vw,22px); line-height:1.55; }
+    .sublead { max-width:1030px; color:var(--muted); font-size:15px; }
+    .tag { display:inline-block; padding:4px 9px; border-radius:6px; background:#dcefed; color:var(--teal-dark); font-size:12px; font-weight:800; vertical-align:middle; }
+    .tag.warn { background:#fff1d9; color:#885c12; }
+    .tag.neutral { background:#e8edee; color:#41575e; }
+    .grid { display:grid; gap:15px; }
+    .grid.two { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .grid.three { grid-template-columns:repeat(3,minmax(0,1fr)); }
+    .grid.four { grid-template-columns:repeat(4,minmax(0,1fr)); }
+    .card { padding:20px 22px; background:var(--white); border:1px solid var(--line); border-radius:16px; box-shadow:0 6px 22px #17323b08; }
+    .card.soft { background:#eaf2f0; }
+    .card.amber { background:#fff8eb; border-color:#f1dfbd; }
+    .card.blue { background:#eef3fa; border-color:#dbe7f5; }
+    .card.rose { background:#fbf0f1; border-color:#efdadd; }
+    .card p:last-child, .card ul:last-child { margin-bottom:0; }
+    .metric { min-height:143px; }
+    .metric .label { display:block; color:var(--muted); font-size:14px; font-weight:700; }
+    .metric strong { display:block; margin:5px 0 0; color:var(--teal-dark); font-size:clamp(34px,3.5vw,50px); line-height:1.1; letter-spacing:-.05em; }
+    .metric span:last-child { color:var(--muted); font-size:12px; }
+    .rule { height:1px; margin:22px 0; background:var(--line); }
+    .mini-heading { margin:0 0 13px; color:var(--muted); font-size:13px; font-weight:800; letter-spacing:.08em; }
+    .overview-deliverables { margin-top:24px; }
+    .numbered { display:flex; align-items:flex-start; gap:13px; }
+    .numbered .n { display:grid; flex:0 0 31px; place-items:center; width:31px; height:31px; border-radius:50%; background:var(--teal); color:white; font-weight:900; }
+    .numbered p { color:var(--muted); font-size:14px; }
+    .callout { margin-top:20px; padding:16px 19px; background:#e8f1ef; border-left:5px solid var(--teal); border-radius:4px 11px 11px 4px; font-size:16px; }
+    .pipeline { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:9px; margin:28px 0 26px; }
+    .step { position:relative; min-height:143px; padding:16px 16px 14px; background:#fff; border:1px solid var(--line); border-radius:13px; }
+    .step:not(:last-child)::after { content:"→"; position:absolute; top:52px; right:-14px; z-index:2; display:grid; place-items:center; width:22px; height:26px; background:var(--paper); color:var(--teal); font-size:22px; font-weight:900; }
+    .step .num { color:var(--teal); font-size:12px; font-weight:900; }
+    .step h3 { margin:7px 0 5px; font-size:16px; }
+    .step p { color:var(--muted); font-size:13px; }
+    .big-split { display:grid; grid-template-columns:1.1fr .9fr; gap:18px; }
+    .stat-line { display:flex; justify-content:space-between; align-items:baseline; gap:14px; padding:12px 0; border-bottom:1px solid var(--line); }
+    .stat-line:last-child { border-bottom:0; }
+    .stat-line strong { font-size:22px; color:var(--teal-dark); }
+    .stat-line span { color:var(--muted); font-size:14px; }
+    .funnel { display:flex; gap:7px; align-items:stretch; margin:21px 0 22px; }
+    .funnel .box { flex:1; padding:17px 13px; background:#fff; border:1px solid var(--line); border-radius:12px; text-align:center; }
+    .funnel .box strong { display:block; font-size:29px; color:var(--teal-dark); line-height:1.2; }
+    .funnel .box span { display:block; font-size:12px; color:var(--muted); }
+    .funnel .arrow { align-self:center; color:var(--teal); font-size:25px; font-weight:900; }
+    .stacked { display:flex; height:48px; overflow:hidden; border-radius:11px; background:#dce5e4; }
+    .stacked > span { height:100%; }
+    .surgery { background:var(--teal); width:48.26%; }
+    .intended { background:var(--gold); width:4.78%; }
+    .conservative { background:var(--blue); width:8.70%; }
+    .unknown { background:#aebbc0; width:38.26%; }
+    .legend { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:15px; }
+    .legend div { border-top:5px solid var(--line); padding-top:9px; }
+    .legend div:nth-child(1) { border-color:var(--teal); }
+    .legend div:nth-child(2) { border-color:var(--gold); }
+    .legend div:nth-child(3) { border-color:var(--blue); }
+    .legend div:nth-child(4) { border-color:#aebbc0; }
+    .legend strong { display:block; font-size:27px; line-height:1.1; }
+    .legend span { color:var(--muted); font-size:12px; }
+    .review-note { display:flex; align-items:center; gap:20px; }
+    .review-note .huge { color:var(--orange); font-size:56px; font-weight:900; line-height:1; }
+    .review-note p { margin:0; color:var(--muted); font-size:14px; }
+    .case-quote { margin:13px 0; padding:13px 15px; border-left:4px solid var(--teal); border-radius:4px; background:#f3f8f7; color:#294951; font-size:15px; }
+    .case-quote.alt { border-color:var(--blue); background:#f1f5fa; }
+    .case-id { display:block; margin-bottom:8px; color:var(--muted); font-size:12px; font-weight:700; overflow-wrap:anywhere; }
+    .case-result { display:inline-block; margin-top:5px; color:var(--teal-dark); font-weight:900; }
+    .status { display:flex; align-items:flex-start; gap:13px; margin-bottom:13px; }
+    .status .icon { flex:0 0 34px; display:grid; place-items:center; width:34px; height:34px; border-radius:9px; background:#d9eee9; color:var(--teal-dark); font-weight:900; }
+    .status.pending .icon { background:#fff0d2; color:#976b10; }
+    .status.blocked .icon { background:#f6e4e7; color:var(--pink); }
+    .status p { margin:0; color:var(--muted); font-size:14px; }
+    .status strong { color:var(--ink); }
+    .dots { display:flex; gap:5px; flex-wrap:wrap; margin:15px 0 9px; }
+    .dots i { width:17px; height:17px; border-radius:4px; background:#d5e0e0; }
+    .dots i.ok { background:var(--teal); }
+    .dots i.bad { background:var(--orange); }
+    .stage-row { display:grid; grid-template-columns:repeat(3,1fr); gap:15px; margin:25px 0; }
+    .stage { position:relative; min-height:190px; padding:21px; background:#fff; border:1px solid var(--line); border-top:5px solid var(--teal); border-radius:13px; }
+    .stage:not(:last-child)::after { content:"→"; position:absolute; top:80px; right:-17px; z-index:2; width:24px; background:var(--paper); color:var(--teal); text-align:center; font-size:25px; font-weight:900; }
+    .stage:nth-child(2) { border-top-color:var(--blue); }
+    .stage:nth-child(3) { border-top-color:var(--gold); }
+    .stage b { color:var(--teal-dark); font-size:13px; }
+    .stage p { margin:8px 0 0; color:var(--muted); font-size:14px; }
+    .decision { font-size:17px; font-weight:800; }
+    .demo-card { display:flex; flex-direction:column; min-height:280px; }
+    .demo-card .tag { align-self:flex-start; }
+    .demo-card p { color:var(--muted); font-size:14px; }
+    .demo-card ul { margin:0 0 16px; padding-left:20px; color:var(--muted); font-size:13px; }
+    .workbook-card { display:flex; align-items:center; justify-content:space-between; gap:18px; margin-top:15px; }
+    .workbook-card h3 { margin-bottom:4px; }
+    .workbook-card p { margin:0; color:var(--muted); font-size:14px; }
+    .launch { display:inline-flex; justify-content:center; align-items:center; gap:8px; width:max-content; margin-top:auto; padding:10px 16px; border-radius:9px; background:var(--teal); color:#fff; text-decoration:none; font-weight:800; font-size:14px; }
+    .launch:hover { background:var(--teal-dark); color:#fff; }
+    .launcher { margin-top:16px; padding:14px 17px; background:#e8efee; border-radius:10px; color:#425b60; font-size:13px; }
+    .launcher code { display:inline-block; max-width:100%; padding:4px 7px; background:white; border-radius:5px; color:var(--ink); overflow-wrap:anywhere; word-break:break-all; user-select:all; }
+    .launcher .check { font-weight:800; color:var(--teal-dark); }
+    .action-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:15px; margin-top:22px; }
+    .action-grid .card { min-height:215px; }
+    .action-grid b { display:block; margin-bottom:9px; color:var(--teal-dark); font-size:13px; }
+    .action-grid h3 { font-size:18px; }
+    .action-grid p { color:var(--muted); font-size:14px; }
+    .sources { margin-top:18px; color:var(--muted); font-size:12px; }
+    .sources summary { cursor:pointer; font-weight:800; }
+    .sources ul { padding-left:19px; }
+    .sources li { margin:4px 0; overflow-wrap:anywhere; }
+    .footnav { position:sticky; bottom:0; z-index:20; display:flex; align-items:center; gap:12px; min-height:56px; padding:8px clamp(18px,4vw,58px); background:rgba(255,255,255,.97); border-top:1px solid var(--line); }
+    .footnav button { padding:7px 12px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--ink); font-weight:800; font-size:13px; cursor:pointer; }
+    .footnav button:hover:not(:disabled) { border-color:var(--teal); color:var(--teal); }
+    .footnav button:disabled { opacity:.38; cursor:default; }
+    .footnav .count { min-width:48px; color:var(--muted); font-size:13px; font-weight:800; text-align:center; }
+    .footnav .hint { margin-left:auto; color:var(--muted); font-size:12px; }
+    .progress { width:80px; height:5px; margin-left:4px; overflow:hidden; border-radius:3px; background:#dce5e4; }
+    .progress span { display:block; height:100%; background:var(--teal); transition:width .2s; }
+    @media (max-width:980px) { .grid.four { grid-template-columns:repeat(2,1fr); } .pipeline { grid-template-columns:repeat(3,1fr); } .step::after { display:none !important; } .big-split { grid-template-columns:1fr; } .tabs a { padding:8px 9px; } }
+    @media (max-width:690px) { .topbar { align-items:flex-start; flex-wrap:wrap; gap:7px; } .tabs { width:100%; margin-left:0; } .page { min-height:calc(100vh - 142px); } .grid.two, .grid.three, .grid.four, .stage-row, .action-grid { grid-template-columns:1fr; } .pipeline { grid-template-columns:repeat(2,1fr); } .funnel { flex-wrap:wrap; } .funnel .box { min-width:38%; } .funnel .arrow { display:none; } .legend { grid-template-columns:repeat(2,1fr); } .stage::after { display:none !important; } .workbook-card { align-items:flex-start; flex-direction:column; } .footnav .hint { display:none; } }
+    @media print { body { background:#fff; } .topbar, .footnav { display:none; } .page, .page[hidden] { display:block !important; max-width:none; min-height:0; break-after:page; padding:12mm 14mm; } .card, .step, .stage { box-shadow:none; break-inside:avoid; } .sources { display:none; } @page { size:A4 landscape; margin:0; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#overview">AAOCA · 文本侧周报<small>2026.09.25—09.29 / 项目进展</small></a>
+    <nav class="tabs" aria-label="页面导航">
+      <a href="#overview" aria-current="page">01 总览</a>
+      <a href="#pipeline">02 数据底座</a>
+      <a href="#management">03 治疗字段</a>
+      <a href="#cases">04 真实病例</a>
+      <a href="#validation">05 验证与试跑</a>
+      <a href="#research">06 研究切口</a>
+      <a href="#demos">07 现场演示</a>
+      <a href="#next">08 下一步</a>
+    </nav>
+  </header>
+  <main>
+    <section class="page" id="overview" aria-labelledby="overview-title">
+      <div class="eyebrow">2026 年 9 月 25—29 日 · 文本侧进展</div>
+      <h1 id="overview-title" tabindex="-1">把原始病历整理成<br>可核查的研究证据</h1>
+      <p class="lead">本周打通了从原始 PDF 到患者、章节、时间线和治疗证据的流程，并搭建人工复核与浏览入口。现在可以系统审计资料、核查病例、整理待复核的治疗字段。</p>
+      <div class="grid four" aria-label="文本数据规模">
+        <div class="card metric"><span class="label">患者列表</span><strong>232</strong><span>原始队列行数</span></div>
+        <div class="card metric"><span class="label">唯一 PDF</span><strong>342</strong><span>来自 365 个文件路径，含 23 份重复副本</span></div>
+        <div class="card metric"><span class="label">结构化章节</span><strong>13,931</strong><span>9 月 25 日完整快照</span></div>
+        <div class="card metric"><span class="label">患者时间线条目</span><strong>10,341</strong><span>按文书日期组织</span></div>
+      </div>
+      <div class="overview-deliverables">
+        <p class="mini-heading">本周主要成果</p>
+        <div class="grid three">
+          <div class="card numbered"><span class="n">1</span><div><h3>可复用的文本底座</h3><p>提取、OCR、分段、时间线、来源定位和质控可重复运行。</p></div></div>
+          <div class="card numbered"><span class="n">2</span><div><h3>治疗状态与证据定位</h3><p>把已手术、拟手术、明确保守和未知分开，保留每条判断的原文位置。</p></div></div>
+          <div class="card numbered"><span class="n">3</span><div><h3>交互式核验工具与研究草案</h3><p>病例浏览器、Gold Set 审阅台，以及聚焦一个决策点的申请书重构版。</p></div></div>
+        </div>
+      </div>
+      <div class="callout"><strong>本周进展：</strong>文本资料已有可回溯的结构化结果，治疗状态形成候选分组，病例核验与人工复核均有可用入口。</div>
+      <details class="sources"><summary>数字来源与口径</summary><ul><li><a href="../data/derived/v0.1_full/run_metadata.json">完整快照 run_metadata.json</a>：232、342、13,931、10,341。</li><li><a href="../SESSION_LOG.md">SESSION_LOG.md</a>：9 月 25—27 日交付与验收记录。</li></ul></details>
+    </section>
+
+    <section class="page" id="pipeline" aria-labelledby="pipeline-title" hidden>
+      <div class="eyebrow">01 / 数据底座</div>
+      <h2 id="pipeline-title" tabindex="-1">从散乱 PDF 到可追溯的患者时间线</h2>
+      <p class="lead">病历结构化、手术相关信息与检查时间线已纳入同一条可重复的处理链。</p>
+      <div class="pipeline" aria-label="处理流程">
+        <div class="step"><span class="num">01 输入</span><h3>患者清单 + PDF</h3><p>232 行清单、365 个 PDF 路径；病历与检验共同纳入。</p></div>
+        <div class="step"><span class="num">02 对齐</span><h3>患者匹配与去重</h3><p>342 份唯一内容；231 位患者匹配到 PDF。</p></div>
+        <div class="step"><span class="num">03 读取</span><h3>原文提取 + 本地 OCR</h3><p>198 份 PDF 原文字层无法可靠恢复中文；异常页定向 OCR。</p></div>
+        <div class="step"><span class="num">04 结构化</span><h3>章节与日期</h3><p>识别病程、检验、操作、门诊等章节并保留页/行定位。</p></div>
+        <div class="step"><span class="num">05 审计</span><h3>时间线 + 质控</h3><p>10,341 条有日期依据的时间线条目；异常单独留队列。</p></div>
+      </div>
+      <div class="big-split">
+        <div class="card"><p class="mini-heading">目前得到的可用结构</p><div class="stat-line"><span>患者对应关系</span><strong>231 / 232</strong></div><div class="stat-line"><span>规范化章节</span><strong>13,931</strong></div><div class="stat-line"><span>有日期依据的章节</span><strong>10,362</strong></div><div class="stat-line"><span>保留来源定位</span><strong>PDF → 页 → 章节</strong></div></div>
+        <div class="card blue"><p class="mini-heading">可回查的结构化结果</p><h3>同一份资料可以回看原件</h3><p>每条结构化记录可回到原 PDF、页码和章节。原始文字、OCR 文字及标准化结果的对应关系也得到保留。</p><div class="rule"></div><div class="review-note"><span class="huge">0</span><p>完整快照中，非空文本行的章节覆盖缺口与重复覆盖均为 0。<br><strong>章节位置关系通过结构检查。</strong></p></div></div>
+      </div>
+      <details class="sources"><summary>证据与口径</summary><ul><li><a href="../data/derived/v0.1_full/run_metadata.json">完整快照元数据</a>：匹配、OCR、章节、日期和覆盖计数。</li><li><a href="../reports/structure_segmentation_validation_2026-09-25.md">章节规则验证记录</a>：在 342 份文档上复核新增边界。</li><li>时间线按文书日期排列；治疗事件由证据抽取与人工复核确认。</li></ul></details>
+    </section>
+
+    <section class="page" id="management" aria-labelledby="management-title" hidden>
+      <div class="eyebrow">02 / 病例相关性与治疗字段</div>
+      <h2 id="management-title" tabindex="-1">“写过手术”与“实际手术”分开</h2>
+      <p class="lead">先筛 AAOCA 相关证据，再整理实际发生的治疗。计划、讨论和知情同意记作治疗意图；缺少确切处置证据时保留未知。</p>
+      <div class="funnel" aria-label="病例筛选流程">
+        <div class="box"><strong>232</strong><span>患者进入文本审计</span></div><div class="arrow">→</div>
+        <div class="box"><strong>230 + 2</strong><span>自动相关 / 不确定</span></div><div class="arrow">→</div>
+        <div class="box"><strong>62</strong><span>进入 AAOCA 例外复核队列</span></div>
+      </div>
+      <div class="card"><p class="mini-heading">230 位自动相关患者的 observed_management 候选分布</p><div class="stacked" role="img" aria-label="111 位已手术，11 位拟手术，20 位有明确保守证据，88 位未知"><span class="surgery"></span><span class="intended"></span><span class="conservative"></span><span class="unknown"></span></div><div class="legend"><div><strong>111</strong><span>有已完成 AAOCA 手术证据 · 48.3%</span></div><div><strong>11</strong><span>拟/建议手术 · 4.8%</span></div><div><strong>20</strong><span>有明确保守证据 · 8.7%</span></div><div><strong>88</strong><span>仍未知 · 38.3%</span></div></div></div>
+      <div class="grid two" style="margin-top:16px"><div class="card soft"><h3>每个结论可回到证据</h3><p>治疗抽取共保留 1,619 条带来源位置的证据；112 次去重后的 AAOCA 手术事件对应 111 位患者。</p></div><div class="card amber"><h3>人工复核进度：0 / 62</h3><p>例外病例已进入复核工作簿。上图是规则候选状态，等待医生确认。</p></div></div>
+      <details class="sources"><summary>证据与口径</summary><ul><li><a href="../reports/aaoca_exception_scan_2026-09-26.md">AAOCA 例外审计</a>：230 自动相关、2 不确定、62 位例外。</li><li><a href="../data/derived/aaoca_management_rules_v1/run_metadata.json">治疗抽取元数据</a>：111 / 11 / 20 / 88，1,619 条证据、112 次事件。</li><li><a href="../reports/aaoca_management_rules_v1_2026-09-26.md">治疗抽取汇总</a>：状态定义与复核范围。</li></ul></details>
+    </section>
+
+    <section class="page" id="cases" aria-labelledby="cases-title" hidden>
+      <div class="eyebrow">03 / 真实病例证据示例</div>
+      <h2 id="cases-title" tabindex="-1">同样出现“手术”，临床含义不同</h2>
+      <p class="lead">以下两例来自当前本地抽取结果。保留伪名患者 ID 和原 PDF 页码，可在病例浏览器搜索并回看完整文书。</p>
+      <div class="grid two">
+        <div class="card"><span class="tag warn">病例 A · 有手术计划</span><span class="case-id">患者 p_c928419ed1c239ea · 病程第 14 页 / 操作第 12 页</span><div class="case-quote">“患儿需择期手术治疗”</div><div class="case-quote alt">“手术名称:多根导管冠状动脉造影”</div><p>择期治疗属于计划；这次完成的是诊断性冠脉造影。</p><span class="case-result">当前候选状态：拟手术；实际 AAOCA 手术未知</span></div>
+        <div class="card"><span class="tag neutral">病例 B · 做了其他手术</span><span class="case-id">患者 p_d1bc1de3a6474788 · 手术记录第 19 页</span><div class="case-quote">“冠状动脉畸形-其他”</div><div class="case-quote alt">“手术名称:1.VSD修补(肺动脉瓣下型)2.PFO修补”</div><p>冠脉异常见于诊断列表；手术记录为室间隔缺损和卵圆孔修补，与 AAOCA 治疗手术分开记录。</p><span class="case-result">当前候选状态：未知；实际 AAOCA 手术未知</span></div>
+      </div>
+      <div class="callout"><strong>治疗字段的四种证据角色：</strong>治疗意图、诊断性操作、其他手术和已完成的 AAOCA 治疗手术分别记录。</div>
+      <details class="sources"><summary>证据定位</summary><ul><li>示例文本从本地 <a href="../data/derived/aaoca_management_rules_v1/management_evidence.csv">management_evidence.csv</a> 摘取；患者 ID、页码和状态与 <a href="../data/derived/aaoca_management_rules_v1/management_summary.csv">management_summary.csv</a> 对应。</li></ul></details>
+    </section>
+
+    <section class="page" id="validation" aria-labelledby="validation-title" hidden>
+      <div class="eyebrow">04 / 验证与试跑</div>
+      <h2 id="validation-title" tabindex="-1">结构校验完成，模型试跑发现具体问题</h2>
+      <p class="lead">结构校验已通过；48 页 Gold Set 等待人工标注；11 条 LLM 响应试跑揭示了引用和状态一致性问题。</p>
+      <div class="grid three">
+        <div class="card soft"><div class="status"><span class="icon">✓</span><div><h3>结构与来源校验</h3><p>完整快照和治疗抽取包的独立验证均已通过，错误 0、警告 0；记录可追到原始证据。</p></div></div><p><strong>覆盖内容：</strong>文件关联、字段约束和来源指针。</p></div>
+        <div class="card amber"><div class="status pending"><span class="icon">!</span><div><h3>Gold Set 人工核验</h3><p>按原生/OCR × 病历/检验固定抽取 48 页；目前保存的人工标注 0 页。</p></div></div><p><strong>下一步：</strong>完成逐页校正，再评估文字、分段和日期。</p></div>
+        <div class="card rose"><div class="status blocked"><span class="icon">×</span><div><h3>LLM 响应小样本审计</h3><p>11 条试跑响应中，1 条通过校验，10 条被拦截。</p></div></div><div class="dots" aria-label="11 条响应：1 条通过，10 条拦截"><i class="ok"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i></div><p>共记录 52 项校验错误，其中证据 ID 错用 15 次、引文区间不匹配 15 次；同一响应可有多项错误。</p></div>
+      </div>
+      <div class="callout"><strong>下一轮试跑重点：</strong>修复证据 ID、精确引用区间和状态一致性，并用人工标注样本评估效果。</div>
+      <details class="sources"><summary>证据与口径</summary><ul><li><a href="../reports/gold_set_sampling_2026-09-25.md">Gold Set 抽样报告</a>：48 页固定样本；<a href="../data/gold_sets/aao_pdf_pages_v1/manifest.json">manifest</a>。</li><li><a href="../data/derived/aaoca_management_llm_audit_v1/evaluation.md">9 月 29 日试跑审计</a>：11 条响应、1 条原样通过、10 条拦截。</li><li><a href="../SESSION_LOG.md">验收记录</a>：完整快照、治疗抽取与浏览器交付。</li></ul></details>
+    </section>
+
+    <section class="page" id="research" aria-labelledby="research-title" hidden>
+      <div class="eyebrow">05 / 研究方案草案</div>
+      <h2 id="research-title" tabindex="-1">从“预测是否手术”收敛到<br>“先找到会改变行动的证据”</h2>
+      <p class="lead">9 月 29 日申请书重构版把主问题限定在一个儿童 AAOCA 决策点：同一患儿、同一决策前候选池、固定 Top-3，哪些证据最值得先看？</p>
+      <div class="stage-row" aria-label="研究阶段">
+        <div class="stage"><b>GATE 0 · 可行性审计</b><h3>冻结决策点和数据边界</h3><p>核实病例资格、CTA/心超覆盖、文书何时可见、医生能否双审，以及“保守 / 升级评估”的行动定义。</p></div>
+        <div class="stage"><b>RQ1 · 主实验</b><h3>固定预算下找到关键证据</h3><p>在同一候选池、同一 Top-3 预算下，与时间、词法、语义和临床规则等强基线比较。</p></div>
+        <div class="stage"><b>RQ2 · 行动质量验证</b><h3>证据对建议的影响</h3><p>若 RQ1 有稳健收益，再比较模型在受控证据揭示下的行动质量和高后果错误。</p></div>
+      </div>
+      <div class="grid two"><div class="card blue"><h3>文本底座提供证据单元</h3><p>章节、日期和来源指针提供候选证据单元；治疗状态用于回顾性描述与抽样，风险判断由决策前证据和临床定义支持。</p></div><div class="card amber"><h3>待核实的数据条件</h3><p>决策前可见时间 <code>available_at</code>、影像模态覆盖、临床行动边界与双人复核资源。</p></div></div>
+      <details class="sources"><summary>方案依据</summary><ul><li>《本科生科研项目申请书重构版_2026-09-29.md》：项目摘要、Gate 0、RQ1/RQ2 与停止闸门，位于 med_ai_research 工作目录。</li><li><a href="../CONTEXT.md">项目分工与文本目标</a>：影像结构分析由其他同学负责。</li></ul></details>
+    </section>
+
+    <section class="page" id="demos" aria-labelledby="demos-title" hidden>
+      <div class="eyebrow">06 / 现场演示入口</div>
+      <h2 id="demos-title" tabindex="-1">交互式病例核验与复核工具</h2>
+      <p class="lead">以下入口可查看病例时间线、逐页校对 PDF，并打开例外病例复核表。</p>
+      <div class="grid two">
+        <div class="card demo-card"><span class="tag">病例浏览</span><h3>病例浏览器</h3><p>从队列总览进入患者时间线，筛选文书类型，展开章节正文，再定位原 PDF 页。</p><ul><li>查看 232 位患者和文书的动态总览</li><li>从时间线逐级回查章节和原始来源</li><li>查看治疗状态与人工复核标记</li></ul><a class="launch" href="http://127.0.0.1:8790/launch/explorer" target="_blank" rel="noopener">打开病例浏览器 ↗</a></div>
+        <div class="card demo-card"><span class="tag warn">逐页人工审阅</span><h3>Gold Set 审阅台</h3><p>对照原始 PDF 页、原生文字、OCR 和分段预测，逐页人工修正，形成后续评估的参考答案。</p><ul><li>48 页固定抽样，分成 4 个来源/文书层</li><li>跨页查看上下文，保留页码锚点</li><li>支持逐页校正与上下文查看</li></ul><a class="launch" href="http://127.0.0.1:8790/launch/gold" target="_blank" rel="noopener">打开 Gold Set 审阅台 ↗</a></div>
+      </div>
+      <div class="card workbook-card"><div><span class="tag neutral">可编辑工作簿</span><h3>AAOCA 例外病例复核表</h3><p>62 位待审病例与 654 条证据；可填写复核结论，保留页码与来源定位。</p></div><a class="launch" href="http://127.0.0.1:8790/launch/workbook" target="_blank" rel="noopener">在本机打开工作簿 ↗</a></div>
+      <div class="launcher"><span class="check" id="launcher-status">正在检查演示入口…</span><div id="launch-help" hidden>若入口未就绪，在 PowerShell 中运行：<code>python -X utf8 E:\AAOCA_Works\reports\weekly_progress_demo_2026-09-29.py</code>，再刷新本页。</div></div>
+      <details class="sources"><summary>入口来源</summary><ul><li><a href="../case_explorer/README.md">病例浏览器说明</a>；<a href="../docs/gold_set_review.md">Gold Set 审阅台说明</a>。</li></ul></details>
+    </section>
+
+    <section class="page" id="next" aria-labelledby="next-title" hidden>
+      <div class="eyebrow">07 / 接下来需要对齐</div>
+      <h2 id="next-title" tabindex="-1">把可用数据变成可信的研究任务</h2>
+      <p class="lead">文本资料已经可以系统整理和回溯。下一步聚焦决策前证据边界、关键病例复核和影像对齐。</p>
+      <div class="action-grid">
+        <div class="card"><b>01 · 临床定义</b><h3>确认一个决策点</h3><p>和医生讨论“继续保守 / 升级评估”的边界、索引时间，以及哪些证据确实会改变下一步行动。</p><span class="tag warn">需要医生确认</span></div>
+        <div class="card"><b>02 · 关键人工复核</b><h3>先校准文本，再用字段</h3><p>推进 48 页 Gold Set 标注和 62 位 AAOCA 例外病例复核；从治疗未知和日期冲突中抽优先样本。</p><span class="tag warn">待人工标注</span></div>
+        <div class="card"><b>03 · 多模态对齐</b><h3>把影像清单与文本连起来</h3><p>与影像同学核对 CTA、心超的患者覆盖和检查时间；只有模态与时间边界清楚，才进入证据重排实验。</p><span class="tag neutral">跨组协作</span></div>
+      </div>
+      <div class="callout"><strong>研究推进顺序：</strong>确认临床行动边界 → 对齐 CTA / 心超 → 完成人工标注 → 冻结评测任务。</div>
+      <details class="sources"><summary>口径说明</summary><ul><li>本页数字来自 9 月 25 日完整文本快照、9 月 26 日治疗/例外结果和 9 月 29 日小样本响应审计，时间与分母各自标注。</li></ul></details>
+    </section>
+  </main>
+  <footer class="footnav" aria-label="翻页控制"><button type="button" id="prev" aria-label="上一页">← 上一页</button><span class="count" id="count">1 / 8</span><button type="button" id="next-button" aria-label="下一页">下一页 →</button><div class="progress" aria-hidden="true"><span id="progress"></span></div><span class="hint">点击顶部目录，或使用 ← → 方向键切换 · Ctrl+P 可打印</span></footer>
+  <script>
+    (() => {
+      const pages = [...document.querySelectorAll('.page')];
+      const tabs = [...document.querySelectorAll('.tabs a')];
+      const prev = document.getElementById('prev');
+      const next = document.getElementById('next-button');
+      const count = document.getElementById('count');
+      const progress = document.getElementById('progress');
+      let current = 0;
+      function show(index, focus = false) {
+        current = Math.max(0, Math.min(index, pages.length - 1));
+        pages.forEach((page, i) => { page.hidden = i !== current; });
+        tabs.forEach((tab, i) => { if (i === current) tab.setAttribute('aria-current', 'page'); else tab.removeAttribute('aria-current'); });
+        prev.disabled = current === 0;
+        next.disabled = current === pages.length - 1;
+        count.textContent = `${current + 1} / ${pages.length}`;
+        progress.style.width = `${(current + 1) / pages.length * 100}%`;
+        if (focus) pages[current].querySelector('h1,h2').focus({ preventScroll:true });
+        window.scrollTo({ top:0, behavior:'instant' });
+      }
+      function syncHash(focus = false) {
+        const index = pages.findIndex(page => `#${page.id}` === location.hash);
+        show(index < 0 ? 0 : index, focus);
+      }
+      function move(delta) {
+        const target = Math.max(0, Math.min(current + delta, pages.length - 1));
+        if (target !== current) { location.hash = pages[target].id; show(target, true); }
+      }
+      prev.addEventListener('click', () => move(-1));
+      next.addEventListener('click', () => move(1));
+      window.addEventListener('hashchange', () => syncHash(true));
+      window.addEventListener('keydown', event => {
+        const tag = document.activeElement && document.activeElement.tagName;
+        if (event.altKey || event.ctrlKey || event.metaKey || ['INPUT','TEXTAREA','SELECT'].includes(tag)) return;
+        if (event.key === 'ArrowRight' || event.key === 'PageDown') { event.preventDefault(); move(1); }
+        if (event.key === 'ArrowLeft' || event.key === 'PageUp') { event.preventDefault(); move(-1); }
+        if (event.key === 'Home') { event.preventDefault(); location.hash = pages[0].id; show(0, true); }
+        if (event.key === 'End') { event.preventDefault(); location.hash = pages[pages.length-1].id; show(pages.length-1, true); }
+      });
+      syncHash();
+      const status = document.getElementById('launcher-status');
+      const help = document.getElementById('launch-help');
+      fetch('http://127.0.0.1:8790/health', { cache:'no-store' })
+        .then(response => { if (!response.ok) throw new Error('offline'); status.textContent = '演示入口已就绪；点击按钮可启动系统'; help.hidden = true; })
+        .catch(() => { status.textContent = '演示入口未启动'; help.hidden = false; });
+      if (location.protocol === 'http:') {
+        document.querySelectorAll('.sources a[href^="../"]').forEach(link => {
+          link.href = '/source/' + link.getAttribute('href').slice(3);
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
