@@ -24,6 +24,8 @@ deterministic 包仍可独立使用。LLM 是可替换 sidecar，不改变 `data
 - 明确的上下文纳入/省略收据；
 - prompt/interface/schema 版本。
 
+management v1.2 新增的复杂处置字段全部随 summary 进入请求；JSON 列解码为真正的数组/对象。默认 `ambiguous` 路由同时纳入高优先级复杂病例，包括已有 AAOCA 手术但另一次复杂操作目标不明的患者。`context_only` 不能充当手术完成证据。prompt 更新为 `aaoca_management_review_prompt_v1.1`，provider/response contract 不固定新模型或 endpoint。
+
 每个 passage 都有稳定 `passage_id`、`document_id`、`section_id`、页码、section JSON 路径与 pointer、`section_char_start/end` 和原文。请求包验证器会回到 source section，要求 `text == section_text[start:end]`。
 
 ### Provider adapter
@@ -161,13 +163,15 @@ python -X utf8 scripts/aaoca_management_llm.py reconcile `
   --output data/derived/aaoca_management_hybrid_v1
 ```
 
-## 5. 当前真实 request package
+## 5. 历史 request package 与本轮覆盖约定
 
-默认 prepare 从 230 位 deterministic 患者中选出 124 位：5 surgery、11 intended surgery、20 conservative、88 unknown。436 条可用 deterministic evidence 全部进入请求，没有 evidence row 因限额省略。上下文形成 2,734 个 passages，共 2,778,830 个字符。
+2026-09-26 的默认 prepare 从 230 位 deterministic 患者中选出 124 位：5 surgery、11 intended surgery、20 conservative、88 unknown。436 条可用 deterministic evidence 全部进入请求，没有 evidence row 因限额省略。上下文形成 2,734 个 passages，共 2,778,830 个字符。这些是历史数值；本轮 v1.2 覆盖后的计数见 `run_metadata.json` 与 2026-10-14 验收报告。
 
 122/124 个请求的 `context_truncated=true`，原因主要是患者可用 section 多于默认 24 个；这不表示已有 436 条 management evidence 被删除。每个请求仍保留实际 included/omitted receipt。最小/中位/最大 passage 字符量约为 7,422 / 21,820 / 39,750，均低于 80,000 的 patient 上限。
 
 此目录包含临床原文，只能本地保存。当前没有 response 文件，也没有运行 reconciliation 得到真实 hybrid label；测试中的 response 只来自合成病例和 fake client。
+
+按本轮用户要求，LLM 分支仅作为可替换测试原型，旧 response/hybrid 不做迁移或兼容保留。更新 deterministic 后重新 prepare，所有请求绑定新 source hashes；旧实验输出清除。真实模型尚未接入时只交付新请求包和 fake-client 测试通过的接口，不制造新模型结论。
 
 ## 6. 仍需用户决定的内容
 

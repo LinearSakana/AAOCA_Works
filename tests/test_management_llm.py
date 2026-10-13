@@ -221,6 +221,11 @@ class ManagementLlmTests(unittest.TestCase):
             self.assertTrue(all(row["prompt_version"] == "custom_test_prompt_v1" for row in rows))
             self.assertTrue(all(row["instructions"] == "Custom local review instructions." for row in rows))
             self.assertTrue(all(row["case"]["source_passages"] for row in rows))
+            for row in rows:
+                summary = row["case"]["deterministic_summary"]
+                for field in ("other_procedure_contexts", "other_procedure_categories", "management_complexity_flags",
+                              "management_context_evidence_ids", "complex_case_review_reasons", "unrelated_procedure_names"):
+                    self.assertIsInstance(summary[field], list)
             validation = validate_llm_request_package(requests, management, run)
             self.assertEqual(validation["validation_status"], "passed")
 

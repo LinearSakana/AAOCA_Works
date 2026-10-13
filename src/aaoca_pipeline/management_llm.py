@@ -24,6 +24,7 @@ import re
 from typing import Iterable, Mapping, Protocol
 
 from .io_utils import sha256_file, write_csv, write_json, write_text
+from .management_context import CONTEXT_LIST_FIELDS
 from .management import (
     AAOCA_ANCHOR_RE,
     MANAGEMENT_VALUES,
@@ -37,7 +38,7 @@ from .management import (
 
 
 LLM_INTERFACE_VERSION = "aaoca_management_llm_v1"
-PROMPT_VERSION = "aaoca_management_review_prompt_v1"
+PROMPT_VERSION = "aaoca_management_review_prompt_v1.1"
 
 REQUEST_MANIFEST_FIELDS = [
     "request_id",
@@ -110,6 +111,11 @@ Rules:
    and/or an exact source passage span. Quotes must be copied exactly.
 9. Return only an object conforming to the supplied response schema. Do not
    include identifiers or facts absent from the request.
+10. Competing-procedure context is a research stratum, not a diagnosis or proof
+    of AAOCA treatment. `context_only` assertions cannot establish completed
+    AAOCA surgery. Coronary transfer during a complex congenital repair needs
+    explicit target attribution; absence of a coronary-handling statement
+    remains unresolved. Link each handling claim to its actual procedure date.
 """
 
 
@@ -307,6 +313,7 @@ def _selection_match(summary: dict[str, str], policy: str) -> bool:
             or summary.get("management_confidence") != "high"
             or int(summary.get("n_surgery_events") or 0) > 1
             or summary.get("surgery_event_count_status") != "exact"
+            or summary.get("complex_case_review_priority") == "high"
         )
     raise ValueError(f"Unsupported selection policy: {policy}")
 
@@ -318,6 +325,7 @@ def _evidence_priority(row: dict[str, str], primary_ids: set[str]) -> tuple:
         "conservative": 6,
         "intended": 5,
         "unrelated_completed": 4,
+        "context_only": 4,
         "diagnostic_completed": 3,
     }
     strength_priority = {"high": 3, "medium": 2, "low": 1}
@@ -465,6 +473,8 @@ def _request_summary(row: dict[str, str]) -> dict:
             "procedure_types",
             "procedure_names",
             "review_reasons",
+            "unrelated_procedure_names",
+            *sorted(CONTEXT_LIST_FIELDS),
         ],
         [
             "has_completed_surgery_evidence",

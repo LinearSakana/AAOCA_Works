@@ -547,6 +547,22 @@ class ManagementTests(unittest.TestCase):
                 {error["code"] for error in result["errors"]},
             )
 
+    def test_validator_rejects_fabricated_coronary_handling(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            run, review = self._make_sources(root)
+            output = root / "management"
+            write_management_package(run, review, output)
+            rows = _read(output / "management_summary.csv")
+            other = next(row for row in rows if row["patient_id"] == "p_other_only")
+            other["aaoca_handling_during_other_procedure"] = "explicitly_not_treated"
+            other["management_context_evidence_ids"] = '["fabricated_id"]'
+            write_csv(output / "management_summary.csv", rows)
+            result = validate_management_package(output, run, review)
+            self.assertEqual(result["validation_status"], "failed")
+            self.assertIn("summary_management_context_mismatch", {error["code"] for error in result["errors"]})
+            self.assertIn("summary_context_evidence_invalid", {error["code"] for error in result["errors"]})
+
 
 def _read(path: Path) -> list[dict[str, str]]:
     with path.open(encoding="utf-8-sig", newline="") as handle:

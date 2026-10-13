@@ -1,4 +1,4 @@
-# AAOCA 实际治疗与手术整理（deterministic v1.1）
+# AAOCA 实际治疗与手术整理（deterministic v1.2）
 
 ## 1. 任务边界
 
@@ -13,7 +13,7 @@ patient-level 主状态为：
 | `conservative` | 有明确不处理、暂无手术指征、保守治疗、观察或随访证据。没有找到手术记录本身不能产生此状态。 |
 | `unknown` | 现有证据不能可靠支持前三种状态。只有冠脉造影/心导管检查、无关手术或文书缺失时仍可为 `unknown`。 |
 
-`overall_treatment_status` 使用同一组值，但任何已完成的、可追溯的心脏手术都会记为 `surgery`。因此，一位完成 VSD/PFO 修补而没有 AAOCA 处理信息的患者会同时保留：
+`overall_treatment_status` 使用同一组值，任何已完成的、可追溯的治疗性操作（包括治疗性导管介入及非心脏手术）都会记为 `surgery`；纯诊断性造影不在其中。具体操作范围由新增的 `other_procedure_modes/categories` 区分。因此，一位完成 VSD/PFO 修补而没有 AAOCA 处理信息的患者会同时保留：
 
 - `observed_management=unknown`：AAOCA 的实际处理无法确定；
 - `overall_treatment_status=surgery`、`overall_treatment_rule=completed_non_aaoca_surgery_evidence`：患者确实接受过其他手术；
@@ -72,6 +72,8 @@ python -X utf8 scripts/aaoca_management.py validate `
 - 手术事件：`n_surgery_events`、`surgery_event_count_status`、首次/末次/全部日期、日期精度、事件 ID；
 - 手术归一化：`procedure_types` 与保留原文的 `procedure_names`；
 - 证据存在性：完成、意向、取消/拒绝、保守、诊断性操作、无关手术六类布尔字段；另保留无关手术证据行数及原始术名；
+- 共病/复杂操作：`other_cardiac_procedure_status`、`other_procedure_modes/categories`、`aaoca_handling_during_other_procedure` 与逐条关联的 `other_procedure_contexts`；
+- 疑难研究分层：`management_complexity_flags`、`management_context_evidence_ids`、`complex_case_review_priority/reasons`；
 - 主证据定位：`document_id`、`section_id`、页码、section JSON 路径和 JSON pointer；
 - 复核：`review_required` 与 `review_reasons`。
 
@@ -85,6 +87,7 @@ python -X utf8 scripts/aaoca_management.py validate `
 - `conservative`：明确不处理、无手术指征、保守或随访观察；
 - `diagnostic_completed`：冠脉造影/心导管等已完成诊断操作，明确不计 AAOCA 手术；
 - `unrelated_completed`：真实完成的其他手术，但 AAOCA 关系未建立，明确不计 AAOCA 手术。
+- `context_only`：复杂矫治中的冠脉操作、等待进一步讨论等背景事实；本身不改变 AAOCA management，也不能建立 AAOCA surgery。
 
 `char_start/char_end` 是带上下文的 evidence excerpt 在 section 正文中的 0-based、右端不含区间；`assertion_char_start/assertion_char_end` 是触发断言本身的精确位置。验证器会重新打开 section JSON，核对 excerpt 原文以及 assertion span 必须落在 excerpt 内。`source_pdf`、页码、`text_path` 和 `text_reference` 提供回到原始病例的路径。
 
@@ -100,6 +103,27 @@ python -X utf8 scripts/aaoca_management.py validate `
 - `month`：`YYYY-MM`，`date_status=partial`；
 - `unknown`：不能可靠定位；
 - 文书内出现互相冲突的手术日期时保留选中值并标记 `date_status=conflict`，不能当作无冲突日期使用。
+
+### 共病和复杂处置的研究字段（v1.2 新增）
+
+这些是记录支持的研究筛选层，不表示共病导致某种处置的因果关系，也不是手术指征或疾病严重度评分。旧列保留；schema 升为 `aaoca_management_v1.1`，ruleset 为 `aaoca_management_rules_v1.2`。
+
+| 字段 | 语义与允许值 |
+|---|---|
+| `other_cardiac_procedure_status` | `completed_other_cardiac_procedure`：有其他心脏治疗性操作；`diagnostic_only_documented`：只发现诊断性操作而未发现其他心脏治疗操作；`none_documented`：未检出上述其他心脏操作。三者均不否认独立 AAOCA 手术。 |
+| `other_procedure_modes` | JSON 多选：`cardiac_surgery`、`cardiac_catheter_intervention`、`noncardiac_surgery`、`unclassified_operation`。 |
+| `other_procedure_categories` | 依据实际术名细分为间隔缺损修补、瓣膜操作、流出道/肺动脉操作、PDA/主动脉弓操作、肺静脉纠治、复杂先心矫治、其他血管/冠脉操作、电生理及非心脏操作等；可能多选。 |
+| `aaoca_handling_during_other_procedure` | `concomitant_aaoca_repair`、`explicitly_not_treated`、`assessed_no_intervention`、`coronary_manipulated_target_unclear`、`not_documented`、`conflicting_documentation`、`multiple_contexts`、`not_applicable`。 |
+| `other_procedure_contexts` | JSON 对象列表；每项保留 `procedure_evidence_id`、该证据所载操作日期、操作方式/类别、AAOCA 处理状态及 `handling_evidence_ids`。这是证据层列表，不能以列表长度当作手术次数。 |
+| `management_complexity_flags` | 可并存的事实/疑难标签，例如其他心脏操作后 AAOCA 去向不明、复杂矫治目标不明、仅影像记载未处理、混合管理阶段、拒绝/暂缓、等待讨论、多次 AAOCA 手术及日期不确定。 |
+| `management_context_evidence_ids` | 上述分层的原始证据集合，可 join 到 `management_evidence.csv`。单纯证据缺失标签允许空列表，并明确表示缺失而非阳性结论。 |
+| `complex_case_review_priority/reasons` | `high/medium/routine` 及原因；优先级服务人工研究抽查，不表示医疗紧急程度。高优先级包括其他心脏操作后 AAOCA management 不明、复杂矫治目标不明、直接处理记录冲突或操作类型无法确定。 |
+
+处理状态只关联同一 section，或同文档、明确同日的正式手术/术后记录；以前的 AAOCA 修复不能填入另一次无关手术。多个操作背景不一致时保留 `multiple_contexts` 并逐项列出。出院记录转录影像中的“未处理”保留 `nonoperation_reported_in_imaging_only`，不会冒充术中直接记录。
+
+ASO 等复杂先心矫治中明确存在冠脉 Button 移植时，保留实际操作证据，但若目的未明确归属于 AAOCA，使用 `coronary_manipulated_target_unclear`。纯 VSD/PFO 修补且未说明冠脉处理时，使用 `not_documented`；其 AAOCA management 继续为 `unknown`，同时可筛选出已完成间隔修补及高优先级复核。
+
+只有伴随肺动脉成形的 AAOCA 术名不会自动产生“共病操作”，因为肺动脉成形本身可能是 AAOCA 的辅助处理。其他操作名称中同时出现封堵/球囊成形与造影时，保留治疗性操作，不能将整份手术记录降为纯诊断操作。
 
 ### 其他文件
 

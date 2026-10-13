@@ -26,10 +26,11 @@ import re
 from typing import Iterable, Protocol
 
 from .io_utils import sha256_file, write_csv, write_json, write_text
+from .management_context import CONTEXT_FIELDS, CONTEXT_LIST_FIELDS, management_context, procedure_profile
 
 
-RULESET_VERSION = "aaoca_management_rules_v1.1"
-SCHEMA_VERSION = "aaoca_management_v1"
+RULESET_VERSION = "aaoca_management_rules_v1.2"
+SCHEMA_VERSION = "aaoca_management_v1.1"
 
 MANAGEMENT_VALUES = {"surgery", "intended_surgery", "conservative", "unknown"}
 SURGERY_STATUS_VALUES = {"yes", "no", "unknown"}
@@ -40,6 +41,7 @@ ASSERTION_VALUES = {
     "conservative",
     "diagnostic_completed",
     "unrelated_completed",
+    "context_only",
 }
 
 SELECTION_FIELDS = [
@@ -141,6 +143,7 @@ SUMMARY_FIELDS = [
     "has_unrelated_surgery_evidence",
     "n_unrelated_surgery_evidence_rows",
     "unrelated_procedure_names",
+    *CONTEXT_FIELDS,
     "primary_evidence_id",
     "primary_document_id",
     "primary_section_id",
@@ -721,11 +724,17 @@ class DeterministicManagementEvidenceExtractor:
                         extra_flags=["does_not_count_as_aaoca_surgery"],
                     )
                 )
-            elif (
-                subtype == "surgery_record"
+            if (
+                not types
+                and (
+                    not DIAGNOSTIC_PROCEDURE_RE.search(_compact(value))
+                    or procedure_profile(value)[0] != "unclassified_operation"
+                )
+                and subtype == "surgery_record"
                 and not is_planned_field
                 and THERAPEUTIC_OPERATION_RE.search(_compact(value))
             ):
+                # A mixed therapy/angiography field retains BOTH assertions.
                 # Preserve an auditable negative decision boundary.  A real
                 # operation in an AAOCA patient's chart is not necessarily an
                 # AAOCA operation (ASD/VSD repair is a common example).  These
@@ -751,6 +760,37 @@ class DeterministicManagementEvidenceExtractor:
                         extra_flags=flags,
                     )
                 )
+
+        # Complex congenital operations may manipulate coronary buttons as part
+        # of another repair.  Preserve the action for review without asserting
+        # that the operation was performed to correct AAOCA.
+        if section.get("section_subtype") == "surgery_record" and any(
+            row["assertion"] == "unrelated_completed" for row in rows
+        ):
+            for match in re.finditer(
+                r"冠(?:状动)?脉[^。；;]{0,65}(?:Button|纽扣|按钮)[^。；;]{0,65}(?:移植|再植|吻合)|"
+                r"冠(?:状动)?脉[^。；;]{0,25}(?:游离|剪下|切下)[^。；;]{0,65}(?:移植|再植|吻合)",
+                text, re.I,
+            ):
+                rows.append(_evidence_row(
+                    section, rule_id="coronary_manipulation_during_other_operation",
+                    assertion="context_only", event_kind="operative_context", strength="high",
+                    relation="unresolved", counts_as_surgery=False, procedure_name="", procedure_types=[],
+                    start=match.start(), end=match.end(), date_policy="section",
+                    extra_flags=["does_not_count_as_aaoca_surgery", "complex_procedure_relation_requires_review"],
+                ))
+
+        if section.get("section_type") in {"discharge", "progress", "consultation"} and SPECIFIC_AAOCA_DIAG_RE.search(text):
+            for match in re.finditer(
+                r"(?:待|拟|计划)[^。；;\n]{0,65}(?:心脏内外科|心内外科|内外科)[^。；;\n]{0,20}讨论[^。；;\n]{0,45}",
+                text,
+            ):
+                rows.append(_evidence_row(
+                    section, rule_id="aaoca_management_decision_pending",
+                    assertion="context_only", event_kind="management_context", strength="medium",
+                    relation="probable", counts_as_surgery=False, procedure_name="", procedure_types=[],
+                    start=match.start(), end=match.end(), date_policy="section",
+                ))
 
         # A named operation outside a well-formed field is still useful when
         # completion or planning is explicit.  This recovers historical and
@@ -1671,6 +1711,17 @@ def _patient_summary(
         "primary_text_path": primary["text_path"] if primary else "",
         "primary_text_reference": primary["text_reference"] if primary else "",
     }
+    context = management_context(evidence, events, management)
+    if context["complex_case_review_reasons"]:
+        review_reasons.append("complex_management_context")
+        qc.append({
+            "patient_id": patient_id,
+            "observed_management": management,
+            "issue_type": "complex_management_context",
+            "severity": context["complex_case_review_priority"],
+            "evidence_ids": context["management_context_evidence_ids"],
+            "detail": "; ".join(context["complex_case_review_reasons"]),
+        })
     review_reasons = list(dict.fromkeys(review_reasons))
     row = {
         "patient_id": patient_id,
@@ -1699,6 +1750,7 @@ def _patient_summary(
         "has_unrelated_surgery_evidence": bool(unrelated),
         "n_unrelated_surgery_evidence_rows": len(unrelated),
         "unrelated_procedure_names": unrelated_procedure_names,
+        **context,
         **primary_values,
         "n_management_evidence_rows": len(evidence),
         "review_required": bool(review_reasons),
@@ -1733,7 +1785,32 @@ def aggregate_management(
 
 
 def _package_readme() -> str:
-    return """# AAOCA management deterministic output\n\nThis restricted local directory contains patient-derived evidence excerpts.\nDo not commit, upload, or send it to an external service.\n\n- `management_summary.csv`: one row per included `AAOCA=yes` patient.\n- `surgery_events.csv`: deduplicated AAOCA-related completed operations.\n- `management_evidence.csv`: every assertion with exact source and character span.\n- `cohort_selection.csv`: how the AAOCA review result selected/excluded patients.\n- `qc/review_queue.csv`: unknown, conflicting, mixed-stage, and date-review cases.\n- `run_metadata.json`: ruleset, source hashes, counts, and privacy/runtime receipt.\n\n`observed_management` is AAOCA-specific: its `surgery` state requires completed\nAAOCA-operation evidence. `overall_treatment_status` separately records an actual\ncompleted non-AAOCA cardiac operation as `surgery`. A planned procedure, consent,\npreoperative discussion, catheterisation, or coronary angiography cannot establish\nAAOCA surgery. `conservative` requires affirmative non-operative evidence; missing\nsurgery documentation remains `unknown`.\n"""
+    return """# AAOCA management deterministic output
+
+This restricted local directory contains patient-derived evidence excerpts.
+Do not commit or distribute it outside an explicitly authorized review workflow.
+
+- `management_summary.csv`: one row per included `AAOCA=yes` patient.
+- `surgery_events.csv`: deduplicated AAOCA-related completed operations.
+- `management_evidence.csv`: every assertion with exact source and character span.
+- `cohort_selection.csv`: how the AAOCA review result selected/excluded patients.
+- `qc/review_queue.csv`: unknown, conflicting, mixed-stage, and date-review cases.
+- `run_metadata.json`: ruleset, source hashes, counts, and privacy/runtime receipt.
+
+`observed_management` is AAOCA-specific: its `surgery` state requires completed
+AAOCA-operation evidence. `overall_treatment_status` also records completed other
+therapeutic procedures, including catheter interventions and noncardiac surgery.
+Use `other_procedure_modes/categories` to distinguish them. Diagnostic angiography,
+plans, consent and preoperative discussion cannot establish AAOCA surgery.
+`conservative` requires affirmative evidence; missing documentation stays unknown.
+
+Complex-case fields describe documented facts and review priorities, not clinical
+severity or surgical indications. `other_procedure_contexts` links each observed
+other procedure and its coronary handling to exact evidence IDs; these objects
+are not deduplicated operation counts. Missing coronary handling is not evidence
+of non-treatment. `context_only` assertions cannot establish AAOCA surgery.
+See docs/aaoca_management.md in the source repository for field definitions.
+"""
 
 
 def write_management_package(
@@ -1779,6 +1856,8 @@ def write_management_package(
             "management_statuses": dict(Counter(row["observed_management"] for row in summaries)),
             "overall_treatment_statuses": dict(Counter(row["overall_treatment_status"] for row in summaries)),
             "actual_aaoca_surgery": dict(Counter(row["actual_aaoca_surgery"] for row in summaries)),
+            "other_cardiac_procedure_statuses": dict(Counter(row["other_cardiac_procedure_status"] for row in summaries)),
+            "complex_case_review_priorities": dict(Counter(row["complex_case_review_priority"] for row in summaries)),
             "patients_with_multiple_surgery_events": sum(int(row["n_surgery_events"]) > 1 for row in summaries),
         },
         "source_hashes": {
@@ -1789,6 +1868,7 @@ def write_management_package(
             "relevance_cases": sha256_file(relevance_root / "exception_cases.csv"),
         },
         "code_sha256": sha256_file(code_path),
+        "context_code_sha256": sha256_file(Path(__file__).with_name("management_context.py")),
     }
     write_json(output / "run_metadata.json", metadata)
     validation = validate_management_package(output, run_root, relevance_root)
@@ -1913,6 +1993,16 @@ def validate_management_package(
         )
         if _json_list(row.get("unrelated_procedure_names")) != expected_unrelated_names:
             errors.append({"code": "summary_unrelated_names_mismatch", "patient_id": patient_id})
+        expected_context = management_context(
+            patient_evidence, [event for event in events if event["patient_id"] == patient_id], status
+        )
+        for field, expected in expected_context.items():
+            actual = _json_list(row.get(field)) if field in CONTEXT_LIST_FIELDS else row.get(field)
+            if actual != expected:
+                errors.append({"code": "summary_management_context_mismatch", "patient_id": patient_id, "field": field})
+        for context_id in _json_list(row.get("management_context_evidence_ids")):
+            if context_id not in evidence_by_id or evidence_by_id[context_id]["patient_id"] != patient_id:
+                errors.append({"code": "summary_context_evidence_invalid", "patient_id": patient_id})
         if row["actual_aaoca_surgery"] == "no" and not any(
             item["assertion"] == "conservative" and item["strength"] == "high"
             for item in patient_evidence
@@ -2005,6 +2095,8 @@ def validate_management_package(
         or counts.get("management_evidence_rows") != len(evidence)
         or counts.get("surgery_events") != len(events)
         or counts.get("review_queue_rows") != len(qc)
+        or counts.get("other_cardiac_procedure_statuses") != dict(Counter(row.get("other_cardiac_procedure_status") for row in summaries))
+        or counts.get("complex_case_review_priorities") != dict(Counter(row.get("complex_case_review_priority") for row in summaries))
     ):
         errors.append({"code": "metadata_count_mismatch"})
     return {
