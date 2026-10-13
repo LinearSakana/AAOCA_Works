@@ -80,6 +80,8 @@ EVIDENCE_FIELDS = [
     "source_pdf",
     "text_path",
     "text_reference",
+    "assertion_char_start",
+    "assertion_char_end",
     "char_start",
     "char_end",
     "evidence_text",
@@ -117,6 +119,8 @@ SUMMARY_FIELDS = [
     "aaoca_judgment",
     "aaoca_judgment_source",
     "observed_management",
+    "overall_treatment_status",
+    "overall_treatment_rule",
     "actual_aaoca_surgery",
     "management_confidence",
     "management_rule",
@@ -135,6 +139,8 @@ SUMMARY_FIELDS = [
     "has_conservative_evidence",
     "has_diagnostic_procedure_evidence",
     "has_unrelated_surgery_evidence",
+    "n_unrelated_surgery_evidence_rows",
+    "unrelated_procedure_names",
     "primary_evidence_id",
     "primary_document_id",
     "primary_section_id",
@@ -450,6 +456,11 @@ INTRAOPERATIVE_CORONARY_UNTREATED_RE = re.compile(
     re.I | re.DOTALL,
 )
 
+IMAGING_RESULT_PREFIX_RE = re.compile(
+    r"(?:经食管)?超声|多普勒|心脏(?:CT|MRI)|冠脉(?:CT|CTA|造影)|血管造影|DSA",
+    re.I,
+)
+
 
 def _procedure_types(value: str) -> list[str]:
     compact = _compact(value)
@@ -627,6 +638,8 @@ def _evidence_row(
         "source_pdf": section.get("source_pdf", ""),
         "text_path": section.get("text_path", ""),
         "text_reference": section.get("text_reference", ""),
+        "assertion_char_start": start,
+        "assertion_char_end": end,
         "char_start": clip_start,
         "char_end": clip_end,
         "evidence_text": text[clip_start:clip_end],
@@ -813,7 +826,8 @@ class DeterministicManagementEvidenceExtractor:
         # would incorrectly attach VSD/valve operations to AAOCA.  The local
         # competing-lesion guard keeps this fallback narrow.
         for match in MULTIDISCIPLINARY_DECLINE_RE.finditer(text):
-            if not SPECIFIC_AAOCA_DIAG_RE.search(text):
+            relation_context = text[max(0, match.start() - 1200): min(len(text), match.end() + 500)]
+            if not SPECIFIC_AAOCA_DIAG_RE.search(relation_context):
                 continue
             window = text[max(0, match.start() - 260): min(len(text), match.end() + 260)]
             if OTHER_SURGICAL_LESION_RE.search(window):
@@ -841,11 +855,11 @@ class DeterministicManagementEvidenceExtractor:
         # not that AAOCA surgery never occurred at another time.
         for match in MULTIDISCIPLINARY_OBSERVATION_RE.finditer(text):
             relation_window = text[max(0, match.start() - 500): min(len(text), match.end() + 300)]
-            if not AAOCA_ANCHOR_RE.search(text):
-                continue
-            if OTHER_SURGICAL_LESION_RE.search(relation_window) and not AAOCA_ANCHOR_RE.search(relation_window):
+            if not AAOCA_ANCHOR_RE.search(relation_window):
                 continue
             if re.search(r"建议\s*手术|(?:拟|计划|需|需要)[^。；;]{0,12}手术", match.group(0), re.I | re.DOTALL):
+                continue
+            if re.search(r"(?:拒绝|放弃|取消)[^。；;]{0,16}手术", match.group(0), re.I | re.DOTALL):
                 continue
             if re.search(r"(?:会诊|胸外科)[^。；;]{0,35}或[^。；;]{0,35}随\s*访", match.group(0), re.I | re.DOTALL):
                 continue
@@ -893,12 +907,14 @@ class DeterministicManagementEvidenceExtractor:
         # intent even if the record never names a specific repair technique.
         for match in AAOCA_PENDING_SURGERY_DISCHARGE_RE.finditer(text):
             window = text[max(0, match.start() - 260): min(len(text), match.end() + 180)]
-            if not SPECIFIC_AAOCA_DIAG_RE.search(text):
+            relation_context = text[max(0, match.start() - 700): min(len(text), match.end() + 300)]
+            if not SPECIFIC_AAOCA_DIAG_RE.search(relation_context):
                 continue
             if (
                 OTHER_SURGICAL_LESION_RE.search(window)
                 or DIAGNOSTIC_PROCEDURE_RE.search(match.group(0))
                 or re.search(r"手术[^。；;]{0,8}(?:造影|检查)", match.group(0), re.I | re.DOTALL)
+                or MULTIDISCIPLINARY_SURGERY_DEFERRED_RE.search(window)
             ):
                 continue
             rows.append(
@@ -1015,21 +1031,41 @@ class DeterministicManagementEvidenceExtractor:
                     continue
                 if rule_id == "aaoca_followup_observation" and re.search(r"(?:会诊|胸外科)[^。；;\n]{0,30}或[^。；;\n]{0,30}随访", window):
                     continue
+                if rule_id == "aaoca_followup_observation" and re.search(
+                    r"请结合\s*(?:CT|CTA|临床)[^。；;\n]{0,20}建议随\s*访",
+                    match.group(0),
+                    re.I,
+                ):
+                    # A copied imaging recommendation is not an affirmative
+                    # clinical management decision.
+                    continue
                 if re.search(r"家属[^。；;\n]{0,30}(?:认为|自行)", window):
                     continue
+                row_strength = strength
+                extra_flags: list[str] = []
+                if rule_id == "aaoca_explicit_nonoperative_plan":
+                    prefix = text[max(0, match.start() - 180):match.start()]
+                    if IMAGING_RESULT_PREFIX_RE.search(prefix):
+                        # A copied ultrasound/CT label such as "(未处理)"
+                        # supports the encounter-level conservative boundary,
+                        # but is weaker than a signed operation or management
+                        # statement for the actual-surgery tri-state.
+                        row_strength = "medium"
+                        extra_flags.append("embedded_imaging_nonoperation_label")
                 rows.append(
                     _evidence_row(
                         section,
                         rule_id=rule_id,
                         assertion="conservative",
                         event_kind="management_decision",
-                        strength=strength,
-                        relation="definite" if strength == "high" else "probable",
+                        strength=row_strength,
+                        relation="definite" if row_strength == "high" else "probable",
                         counts_as_surgery=False,
                         procedure_name="",
                         procedure_types=[],
                         start=match.start(),
                         end=match.end(),
+                        extra_flags=extra_flags,
                     )
                 )
 
@@ -1349,19 +1385,25 @@ def build_surgery_events(evidence: Iterable[dict]) -> list[dict]:
     return sorted(events, key=lambda row: (row["patient_id"], row["surgery_date"] or "9999-99-99", row["surgery_event_id"]))
 
 
-def _latest_date(rows: Iterable[dict]) -> str:
-    return max((row.get("evidence_date", "") for row in rows if row.get("evidence_date")), default="")
-
-
 def _evidence_at_or_after(candidate: dict, earlier: dict) -> bool:
     """Conservatively order two assertions from the same longitudinal record."""
 
     candidate_date = candidate.get("evidence_date", "")
     earlier_date = earlier.get("evidence_date", "")
     if candidate_date and earlier_date:
-        return candidate_date >= earlier_date
+        candidate_parts = tuple(int(part) for part in candidate_date.split("-") if part.isdigit())
+        earlier_parts = tuple(int(part) for part in earlier_date.split("-") if part.isdigit())
+        if len(candidate_parts) >= 2 and len(earlier_parts) >= 2:
+            if candidate_parts[:2] != earlier_parts[:2]:
+                return candidate_parts[:2] > earlier_parts[:2]
+            if len(candidate_parts) == 3 and len(earlier_parts) == 3 and candidate_parts[2] != earlier_parts[2]:
+                return candidate_parts[2] > earlier_parts[2]
+        # Equal dates, or day-versus-month evidence from the same month, do
+        # not establish order.  Fall through to document/section offsets.
     if candidate.get("section_id") == earlier.get("section_id"):
-        return int(candidate.get("char_start", 0)) >= int(earlier.get("char_start", 0))
+        return int(candidate.get("assertion_char_start", candidate.get("char_start", 0))) >= int(
+            earlier.get("assertion_char_start", earlier.get("char_start", 0))
+        )
     if candidate.get("document_id") == earlier.get("document_id"):
         candidate_match = re.search(r"_s(\d+)$", candidate.get("section_id", ""))
         earlier_match = re.search(r"_s(\d+)$", earlier.get("section_id", ""))
@@ -1405,15 +1447,23 @@ def _patient_summary(
             for row in conservative
             if row["rule_id"] in {"aaoca_multidisciplinary_observation", "aaoca_no_near_term_intervention"}
         ]
-        latest_intent = _latest_date([*intended, *cancelled])
-        latest_explicit_conservative = _latest_date(explicit_conservative)
         conservative_supersedes = bool(
             explicit_conservative
-            and (not latest_intent or (latest_explicit_conservative and latest_explicit_conservative >= latest_intent))
+            and (
+                not (intended or cancelled)
+                or any(
+                    all(_evidence_at_or_after(decision, earlier) for earlier in [*intended, *cancelled])
+                    for decision in explicit_conservative
+                )
+            )
         )
         if not conservative_supersedes and decisive_observation and (intended or cancelled):
             conservative_supersedes = any(
-                all(_evidence_at_or_after(decision, earlier) for earlier in [*intended, *cancelled])
+                not any(
+                    earlier["section_id"] == decision["section_id"]
+                    for earlier in cancelled
+                )
+                and all(_evidence_at_or_after(decision, earlier) for earlier in [*intended, *cancelled])
                 for decision in decisive_observation
             )
         if (intended or cancelled) and not conservative_supersedes:
@@ -1599,6 +1649,18 @@ def _patient_summary(
     event_dates = sorted(event["surgery_date"] for event in events if event["surgery_date"])
     procedure_types = list(dict.fromkeys(item for event in events for item in _json_list(event["procedure_types"])))
     procedure_names = list(dict.fromkeys(item for event in events for item in _json_list(event["procedure_names"])))
+    unrelated_procedure_names = list(
+        dict.fromkeys(row["procedure_name_raw"] for row in unrelated if row.get("procedure_name_raw"))
+    )
+    if events:
+        overall_treatment_status = "surgery"
+        overall_treatment_rule = "completed_aaoca_surgery_evidence"
+    elif unrelated:
+        overall_treatment_status = "surgery"
+        overall_treatment_rule = "completed_non_aaoca_surgery_evidence"
+    else:
+        overall_treatment_status = management
+        overall_treatment_rule = rule
     event_count_status = "exact" if events and all(event["date_status"] == "known" for event in events) else "minimum" if events else "none"
     primary_values = {
         "primary_evidence_id": primary["evidence_id"] if primary else "",
@@ -1615,6 +1677,8 @@ def _patient_summary(
         "aaoca_judgment": "yes",
         "aaoca_judgment_source": judgment_source,
         "observed_management": management,
+        "overall_treatment_status": overall_treatment_status,
+        "overall_treatment_rule": overall_treatment_rule,
         "actual_aaoca_surgery": surgery_status,
         "management_confidence": confidence,
         "management_rule": rule,
@@ -1633,6 +1697,8 @@ def _patient_summary(
         "has_conservative_evidence": bool(conservative),
         "has_diagnostic_procedure_evidence": bool(diagnostics),
         "has_unrelated_surgery_evidence": bool(unrelated),
+        "n_unrelated_surgery_evidence_rows": len(unrelated),
+        "unrelated_procedure_names": unrelated_procedure_names,
         **primary_values,
         "n_management_evidence_rows": len(evidence),
         "review_required": bool(review_reasons),
@@ -1667,7 +1733,7 @@ def aggregate_management(
 
 
 def _package_readme() -> str:
-    return """# AAOCA management deterministic output\n\nThis restricted local directory contains patient-derived evidence excerpts.\nDo not commit, upload, or send it to an external service.\n\n- `management_summary.csv`: one row per included `AAOCA=yes` patient.\n- `surgery_events.csv`: deduplicated AAOCA-related completed operations.\n- `management_evidence.csv`: every assertion with exact source and character span.\n- `cohort_selection.csv`: how the AAOCA review result selected/excluded patients.\n- `qc/review_queue.csv`: unknown, conflicting, mixed-stage, and date-review cases.\n- `run_metadata.json`: ruleset, source hashes, counts, and privacy/runtime receipt.\n\n`observed_management=surgery` requires completed AAOCA-operation evidence. A\nplanned procedure, consent, preoperative discussion, catheterisation, or coronary\nangiography cannot establish surgery. `conservative` requires affirmative\nnon-operative evidence; missing surgery documentation remains `unknown`.\n"""
+    return """# AAOCA management deterministic output\n\nThis restricted local directory contains patient-derived evidence excerpts.\nDo not commit, upload, or send it to an external service.\n\n- `management_summary.csv`: one row per included `AAOCA=yes` patient.\n- `surgery_events.csv`: deduplicated AAOCA-related completed operations.\n- `management_evidence.csv`: every assertion with exact source and character span.\n- `cohort_selection.csv`: how the AAOCA review result selected/excluded patients.\n- `qc/review_queue.csv`: unknown, conflicting, mixed-stage, and date-review cases.\n- `run_metadata.json`: ruleset, source hashes, counts, and privacy/runtime receipt.\n\n`observed_management` is AAOCA-specific: its `surgery` state requires completed\nAAOCA-operation evidence. `overall_treatment_status` separately records an actual\ncompleted non-AAOCA cardiac operation as `surgery`. A planned procedure, consent,\npreoperative discussion, catheterisation, or coronary angiography cannot establish\nAAOCA surgery. `conservative` requires affirmative non-operative evidence; missing\nsurgery documentation remains `unknown`.\n"""
 
 
 def write_management_package(
@@ -1711,6 +1777,7 @@ def write_management_package(
             "surgery_events": len(events),
             "review_queue_rows": len(qc),
             "management_statuses": dict(Counter(row["observed_management"] for row in summaries)),
+            "overall_treatment_statuses": dict(Counter(row["overall_treatment_status"] for row in summaries)),
             "actual_aaoca_surgery": dict(Counter(row["actual_aaoca_surgery"] for row in summaries)),
             "patients_with_multiple_surgery_events": sum(int(row["n_surgery_events"]) > 1 for row in summaries),
         },
@@ -1768,6 +1835,9 @@ def validate_management_package(
     evidence_by_id = {row["evidence_id"]: row for row in evidence}
     if len(evidence_by_id) != len(evidence):
         errors.append({"code": "duplicate_evidence_id"})
+    evidence_by_patient: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for item in evidence:
+        evidence_by_patient[item["patient_id"]].append(item)
     event_by_id = {row["surgery_event_id"]: row for row in events}
     if len(event_by_id) != len(events):
         errors.append({"code": "duplicate_surgery_event_id"})
@@ -1785,6 +1855,9 @@ def validate_management_package(
             errors.append({"code": "invalid_management_status", "patient_id": patient_id, "value": status})
         if row["actual_aaoca_surgery"] not in SURGERY_STATUS_VALUES:
             errors.append({"code": "invalid_surgery_status", "patient_id": patient_id})
+        overall_status = row.get("overall_treatment_status", "")
+        if overall_status not in MANAGEMENT_VALUES:
+            errors.append({"code": "invalid_overall_treatment_status", "patient_id": patient_id})
         if (status == "surgery") != (row["actual_aaoca_surgery"] == "yes"):
             errors.append({"code": "management_surgery_status_mismatch", "patient_id": patient_id})
         if int(row["n_surgery_events"] or 0) != event_counts[patient_id]:
@@ -1799,7 +1872,52 @@ def validate_management_package(
             _bool(row["has_surgical_intent_evidence"]) or _bool(row["has_cancelled_or_declined_evidence"])
         ):
             errors.append({"code": "intent_without_evidence", "patient_id": patient_id})
-        patient_evidence = [item for item in evidence if item["patient_id"] == patient_id]
+        patient_evidence = evidence_by_patient[patient_id]
+        patient_unrelated = [item for item in patient_evidence if item["assertion"] == "unrelated_completed"]
+        expected_flags = {
+            "has_completed_surgery_evidence": any(
+                item["assertion"] == "completed" and _bool(item["counts_as_aaoca_surgery"])
+                for item in patient_evidence
+            ),
+            "has_surgical_intent_evidence": any(
+                item["assertion"] == "intended" and item["event_kind"] != "diagnostic_procedure"
+                for item in patient_evidence
+            ),
+            "has_cancelled_or_declined_evidence": any(
+                item["assertion"] == "cancelled_or_declined" for item in patient_evidence
+            ),
+            "has_conservative_evidence": any(item["assertion"] == "conservative" for item in patient_evidence),
+            "has_diagnostic_procedure_evidence": any(
+                item["assertion"] == "diagnostic_completed" for item in patient_evidence
+            ),
+            "has_unrelated_surgery_evidence": bool(patient_unrelated),
+        }
+        if any(_bool(row.get(field)) != expected for field, expected in expected_flags.items()):
+            errors.append({"code": "summary_evidence_flag_mismatch", "patient_id": patient_id})
+        expected_overall = "surgery" if event_counts[patient_id] or patient_unrelated else status
+        if overall_status != expected_overall:
+            errors.append({"code": "overall_treatment_status_mismatch", "patient_id": patient_id})
+        expected_overall_rule = (
+            "completed_aaoca_surgery_evidence"
+            if event_counts[patient_id]
+            else "completed_non_aaoca_surgery_evidence"
+            if patient_unrelated
+            else row["management_rule"]
+        )
+        if row.get("overall_treatment_rule") != expected_overall_rule:
+            errors.append({"code": "overall_treatment_rule_mismatch", "patient_id": patient_id})
+        if int(row.get("n_unrelated_surgery_evidence_rows") or 0) != len(patient_unrelated):
+            errors.append({"code": "summary_unrelated_count_mismatch", "patient_id": patient_id})
+        expected_unrelated_names = list(
+            dict.fromkeys(item["procedure_name_raw"] for item in patient_unrelated if item["procedure_name_raw"])
+        )
+        if _json_list(row.get("unrelated_procedure_names")) != expected_unrelated_names:
+            errors.append({"code": "summary_unrelated_names_mismatch", "patient_id": patient_id})
+        if row["actual_aaoca_surgery"] == "no" and not any(
+            item["assertion"] == "conservative" and item["strength"] == "high"
+            for item in patient_evidence
+        ):
+            errors.append({"code": "actual_surgery_no_without_high_strength_evidence", "patient_id": patient_id})
         if int(row["n_management_evidence_rows"] or 0) != len(patient_evidence):
             errors.append({"code": "summary_evidence_count_mismatch", "patient_id": patient_id})
         primary_id = row.get("primary_evidence_id", "")
@@ -1852,9 +1970,13 @@ def validate_management_package(
                 errors.append({"code": "evidence_section_missing", "evidence_id": row["evidence_id"]})
                 continue
             start, end = int(row["char_start"]), int(row["char_end"])
+            assertion_start = int(row.get("assertion_char_start") or -1)
+            assertion_end = int(row.get("assertion_char_end") or -1)
             text = section.get("text", "")
             if start < 0 or end < start or end > len(text) or text[start:end] != row["evidence_text"]:
                 errors.append({"code": "evidence_span_mismatch", "evidence_id": row["evidence_id"]})
+            if not (start <= assertion_start < assertion_end <= end):
+                errors.append({"code": "assertion_span_mismatch", "evidence_id": row["evidence_id"]})
         expected_hashes = {
             "run_metadata": sha256_file(run_root / "run_metadata.json"),
             "patient_manifest": sha256_file(run_root / "patient_manifest.csv"),
@@ -1875,9 +1997,11 @@ def validate_management_package(
 
     counts = metadata.get("counts", {})
     actual_statuses = dict(Counter(row["observed_management"] for row in summaries))
+    actual_overall_statuses = dict(Counter(row.get("overall_treatment_status", "") for row in summaries))
     if (
         counts.get("included_patients") != len(summaries)
         or counts.get("management_statuses") != actual_statuses
+        or counts.get("overall_treatment_statuses") != actual_overall_statuses
         or counts.get("management_evidence_rows") != len(evidence)
         or counts.get("surgery_events") != len(events)
         or counts.get("review_queue_rows") != len(qc)

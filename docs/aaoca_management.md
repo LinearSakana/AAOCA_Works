@@ -2,7 +2,7 @@
 
 ## 1. 任务边界
 
-本阶段回答的是患者在现有病例中**实际发生了什么**，而不是未来应接受什么治疗，也不是手术适应证研究。
+本阶段回答的是患者在现有病例中**实际发生了什么**，而不是未来应接受什么治疗，也不是手术适应证研究。`observed_management` 专门表示 AAOCA 的管理状态；为避免把“AAOCA 去向不明”和“患者什么手术都没做”混为一谈，另以 `overall_treatment_status` 表示病例中已观察到的总体治疗路径。
 
 patient-level 主状态为：
 
@@ -13,10 +13,16 @@ patient-level 主状态为：
 | `conservative` | 有明确不处理、暂无手术指征、保守治疗、观察或随访证据。没有找到手术记录本身不能产生此状态。 |
 | `unknown` | 现有证据不能可靠支持前三种状态。只有冠脉造影/心导管检查、无关手术或文书缺失时仍可为 `unknown`。 |
 
+`overall_treatment_status` 使用同一组值，但任何已完成的、可追溯的心脏手术都会记为 `surgery`。因此，一位完成 VSD/PFO 修补而没有 AAOCA 处理信息的患者会同时保留：
+
+- `observed_management=unknown`：AAOCA 的实际处理无法确定；
+- `overall_treatment_status=surgery`、`overall_treatment_rule=completed_non_aaoca_surgery_evidence`：患者确实接受过其他手术；
+- `actual_aaoca_surgery=unknown`：不能把其他手术推断为 AAOCA 已处理或明确未处理。
+
 另有独立字段 `actual_aaoca_surgery=yes/no/unknown`：
 
 - `yes` 只来自已完成 AAOCA 手术事件；
-- `no` 只来自强度为 high 的明确未处理/不手术证据；
+- `no` 只来自现有病例窗口内强度为 high 的明确未处理/不手术证据；
 - 随访、观察、未找到手术记录、手术计划或取消均不能单独证明 `no`，因此保留 `unknown`。
 
 这里的 `conservative` 表示病例支持非手术管理阶段；它不等于终身未手术。若只有较弱的随访/历史观察证据，`observed_management=conservative` 与 `actual_aaoca_surgery=unknown` 会同时保留。
@@ -62,10 +68,10 @@ python -X utf8 scripts/aaoca_management.py validate `
 一位纳入患者一行。主要字段包括：
 
 - cohort：`patient_id`、`aaoca_judgment`、`aaoca_judgment_source`；
-- 总状态：`observed_management`、`actual_aaoca_surgery`、`management_confidence`、`management_rule`；
+- 状态：AAOCA-specific 的 `observed_management`，总体实际治疗的 `overall_treatment_status/overall_treatment_rule`，以及 `actual_aaoca_surgery`、`management_confidence`、`management_rule`；
 - 手术事件：`n_surgery_events`、`surgery_event_count_status`、首次/末次/全部日期、日期精度、事件 ID；
 - 手术归一化：`procedure_types` 与保留原文的 `procedure_names`；
-- 证据存在性：完成、意向、取消/拒绝、保守、诊断性操作、无关手术六类布尔字段；
+- 证据存在性：完成、意向、取消/拒绝、保守、诊断性操作、无关手术六类布尔字段；另保留无关手术证据行数及原始术名；
 - 主证据定位：`document_id`、`section_id`、页码、section JSON 路径和 JSON pointer；
 - 复核：`review_required` 与 `review_reasons`。
 
@@ -80,7 +86,7 @@ python -X utf8 scripts/aaoca_management.py validate `
 - `diagnostic_completed`：冠脉造影/心导管等已完成诊断操作，明确不计 AAOCA 手术；
 - `unrelated_completed`：真实完成的其他手术，但 AAOCA 关系未建立，明确不计 AAOCA 手术。
 
-`char_start/char_end` 是 section 正文的 0-based、右端不含区间；`evidence_text` 必须等于该区间原文。验证器会重新打开 section JSON 核对这一点。`source_pdf`、页码、`text_path` 和 `text_reference` 提供回到原始病例的路径。
+`char_start/char_end` 是带上下文的 evidence excerpt 在 section 正文中的 0-based、右端不含区间；`assertion_char_start/assertion_char_end` 是触发断言本身的精确位置。验证器会重新打开 section JSON，核对 excerpt 原文以及 assertion span 必须落在 excerpt 内。`source_pdf`、页码、`text_path` 和 `text_reference` 提供回到原始病例的路径。
 
 ### `surgery_events.csv`
 
@@ -123,6 +129,8 @@ python -X utf8 scripts/aaoca_management.py validate `
 - 正式手术记录/术后首次病程若明确记录冠脉探查后“未处理/未予处理”，可产生 high-strength `conservative`；同一文书只有 VSD/PFO/ASD 等无关手术而没有这种明确语句时仍为 `unknown`。
 - 同一纵向记录中，后续明确的多学科观察决定可以覆盖更早的条件性手术意向；它只改变当前 `observed_management`，不会把终身手术事实推断为 `no`。
 - 若只有已完成的 VSD/PFO/ASD 等非 AAOCA 手术，patient-level 仍保留 `unknown`；summary 的主证据会指向该排除性手术证据，QC 另列 `unrelated_operation_without_aaoca_management`，明确提示“做过手术”不等于“AAOCA 已处理或明确保守”。
+
+独立复核后进一步收紧了覆盖规则：相同日期不再自动视为“后发生”，而是继续比较文档内 section 序号和精确 assertion offset；同一 section 中的拒绝手术不能被随附的普通出院随访吞没；影像报告中“请结合 CT/临床，建议随访”的模板句不产生保守管理；出院小结转抄超声“未处理”标签只作为 medium-strength 阶段证据，不能单独把 `actual_aaoca_surgery` 置为 `no`。
 
 负向保护仍然优先：诊断性“手术造影检查”、其他结构性心脏病的手术/拒绝、普通专科随访、“胸外科会诊或门诊随访”这种尚未形成决定的二选一表述，以及无 AAOCA 局部语境的出院随访均不能触发上述规则。PDF/OCR 行内换行可以出现在“观察/随访”等词中，但字符 offset 仍指向原 section 文本。
 

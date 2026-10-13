@@ -176,6 +176,25 @@ class ManagementTests(unittest.TestCase):
                 "告知风险后家长拒绝手术，自动出院。",
                 section_type="discharge",
             ),
+            _section(
+                "p_declined_with_followup",
+                "doc_declined_followup_s0001",
+                "出院诊断：右冠状动脉起源于左冠窦。经心脏内外科讨论，考虑手术风险，"
+                "家属拒绝手术并要求自动出院，嘱心内科门诊随访观察。",
+                section_type="discharge",
+            ),
+            _section(
+                "p_same_day_later_intent",
+                "doc_same_day_s0001",
+                "右冠状动脉起源于左冠窦。经心脏内外科讨论后决定先门诊随访观察。",
+                section_type="progress",
+            ),
+            _section(
+                "p_same_day_later_intent",
+                "doc_same_day_s0002",
+                "右冠状动脉起源于左冠窦。心脏内外科讨论建议手术，家属表示再考虑并办理出院。",
+                section_type="discharge",
+            ),
         ]
         patient_ids = [
             "p_surgery",
@@ -193,6 +212,8 @@ class ManagementTests(unittest.TestCase):
             "p_other_untreated",
             "p_other_only",
             "p_other_lesion_refusal",
+            "p_declined_with_followup",
+            "p_same_day_later_intent",
             "p_excluded",
         ]
         write_json(run / "run_metadata.json", {"status": "complete"})
@@ -223,7 +244,7 @@ class ManagementTests(unittest.TestCase):
             {
                 "human_deliverable_scope": "exception_patients_only",
                 "exception_patients": 1,
-                "nonexception_patients": 15,
+                "nonexception_patients": 17,
                 "source_run_metadata_sha256": sha256_file(run / "run_metadata.json"),
                 "source_patient_manifest_sha256": sha256_file(run / "patient_manifest.csv"),
                 "source_section_index_sha256": sha256_file(run / "section_index.csv"),
@@ -365,6 +386,39 @@ class ManagementTests(unittest.TestCase):
             {row["rule_id"] for row in extractor.extract(diagnostic_discharge_template)},
         )
 
+        imaging_followup_template = _section(
+            "p",
+            "doc_q_s0001",
+            "冠状动脉造影报告：右冠起源异常，近段偏细，请结合CT，建议随访。"
+            "病程与治疗经过：已完成造影，术顺，予出院。",
+            section_type="discharge",
+        )
+        self.assertNotIn(
+            "aaoca_followup_observation",
+            {row["rule_id"] for row in extractor.extract(imaging_followup_template)},
+        )
+
+        embedded_imaging_untreated = _section(
+            "p",
+            "doc_r_s0001",
+            "经食管超声心动图：VSD/右冠状动脉起源左冠窦(未处理)/PH术后，无残余分流。",
+            section_type="discharge",
+        )
+        embedded_rows = [
+            row
+            for row in extractor.extract(embedded_imaging_untreated)
+            if row["rule_id"] == "aaoca_explicit_nonoperative_plan"
+        ]
+        self.assertTrue(embedded_rows)
+        self.assertTrue(all(row["strength"] == "medium" for row in embedded_rows))
+        self.assertTrue(all("embedded_imaging_nonoperation_label" in row["flags"] for row in embedded_rows))
+        self.assertTrue(
+            all(
+                row["char_start"] <= row["assertion_char_start"] < row["assertion_char_end"] <= row["char_end"]
+                for row in embedded_rows
+            )
+        )
+
         electrophysiology_risk_plan = _section(
             "p",
             "doc_j_s0001",
@@ -407,7 +461,7 @@ class ManagementTests(unittest.TestCase):
             self.assertEqual(result["validation"]["validation_status"], "passed")
             with (output / "management_summary.csv").open(encoding="utf-8-sig", newline="") as handle:
                 rows = {row["patient_id"]: row for row in csv.DictReader(handle)}
-            self.assertEqual(len(rows), 15)
+            self.assertEqual(len(rows), 17)
             self.assertNotIn("p_excluded", rows)
             self.assertEqual(rows["p_surgery"]["observed_management"], "surgery")
             self.assertEqual(rows["p_surgery"]["n_surgery_events"], "1")
@@ -428,13 +482,22 @@ class ManagementTests(unittest.TestCase):
             self.assertEqual(rows["p_other_untreated"]["observed_management"], "conservative")
             self.assertEqual(rows["p_other_untreated"]["actual_aaoca_surgery"], "no")
             self.assertEqual(rows["p_other_only"]["observed_management"], "unknown")
+            self.assertEqual(rows["p_other_only"]["overall_treatment_status"], "surgery")
+            self.assertEqual(
+                rows["p_other_only"]["overall_treatment_rule"],
+                "completed_non_aaoca_surgery_evidence",
+            )
             self.assertEqual(rows["p_other_only"]["has_unrelated_surgery_evidence"], "True")
+            self.assertEqual(rows["p_other_only"]["n_unrelated_surgery_evidence_rows"], "1")
+            self.assertIn("VSD", " ".join(json.loads(rows["p_other_only"]["unrelated_procedure_names"])))
             self.assertTrue(rows["p_other_only"]["primary_evidence_id"])
             self.assertIn(
                 "unrelated_completed_operation_not_aaoca_management",
                 json.loads(rows["p_other_only"]["review_reasons"]),
             )
             self.assertEqual(rows["p_other_lesion_refusal"]["observed_management"], "unknown")
+            self.assertEqual(rows["p_declined_with_followup"]["observed_management"], "intended_surgery")
+            self.assertEqual(rows["p_same_day_later_intent"]["observed_management"], "intended_surgery")
             with (output / "qc" / "review_queue.csv").open(encoding="utf-8-sig", newline="") as handle:
                 qc_rows = list(csv.DictReader(handle))
             other_only_issues = {
@@ -452,7 +515,7 @@ class ManagementTests(unittest.TestCase):
             selection, receipt = resolve_aaoca_cohort(run, review)
             selected = {row["patient_id"] for row in selection if row["included_for_management"]}
             self.assertIn("p_excluded", selected)
-            self.assertEqual(receipt["included_patients"], 16)
+            self.assertEqual(receipt["included_patients"], 18)
 
     def test_validator_detects_evidence_span_tampering(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -466,6 +529,23 @@ class ManagementTests(unittest.TestCase):
             result = validate_management_package(output, run, review)
             self.assertEqual(result["validation_status"], "failed")
             self.assertIn("evidence_span_mismatch", {error["code"] for error in result["errors"]})
+
+    def test_validator_rejects_unsupported_actual_no(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            run, review = self._make_sources(root)
+            output = root / "management"
+            write_management_package(run, review, output)
+            rows = _read(output / "management_summary.csv")
+            diagnostic = next(row for row in rows if row["patient_id"] == "p_diagnostic")
+            diagnostic["actual_aaoca_surgery"] = "no"
+            write_csv(output / "management_summary.csv", rows)
+            result = validate_management_package(output, run, review)
+            self.assertEqual(result["validation_status"], "failed")
+            self.assertIn(
+                "actual_surgery_no_without_high_strength_evidence",
+                {error["code"] for error in result["errors"]},
+            )
 
 
 def _read(path: Path) -> list[dict[str, str]]:

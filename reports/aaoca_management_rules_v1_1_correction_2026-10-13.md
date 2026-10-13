@@ -31,24 +31,39 @@ Synthetic positive and negative controls cover:
 |---|---:|---:|---:|
 | `surgery` | 111 | 111 | 0 |
 | `intended_surgery` | 11 | 13 | +2 |
-| `conservative` | 20 | 29 | +9 |
-| `unknown` | 88 | 77 | -11 |
+| `conservative` | 20 | 28 | +8 |
+| `unknown` | 88 | 78 | -10 |
 
-The transition matrix contains 3 `unknown -> intended_surgery`, 8 `unknown -> conservative`, and 1 `intended_surgery -> conservative` after later completed evaluation and follow-up decision. The separate `actual_aaoca_surgery` distribution changed from `111 yes / 9 no / 110 unknown` to `111 yes / 12 no / 107 unknown`; all three new `no` values have explicit coronary-not-treated evidence rather than an inference from missing surgery records.
+The transition matrix contains 3 `unknown -> intended_surgery`, 7 `unknown -> conservative`, and 1 `intended_surgery -> conservative` after later completed evaluation and follow-up decision. The separate `actual_aaoca_surgery` distribution changed from `111 yes / 9 no / 110 unknown` to `111 yes / 10 no / 109 unknown`: two previously unknown patients gained high-strength intraoperative coronary-not-treated evidence, while one baseline `no` and one intermediate-candidate `no` were downgraded because their only untreated wording was embedded in copied imaging history rather than a direct management or operative statement.
 
-The operation layer is unchanged: 112 deduplicated AAOCA surgery events among 111 patients. The final candidate contains 1,656 provenance-bearing evidence rows and 209 QC rows. The unchanged surgery/event counts are an important regression check: none of the new refusal, observation, diagnostic, or unrelated-operation paths created a completed AAOCA surgery event.
+The operation layer is unchanged: 112 deduplicated AAOCA surgery events among 111 patients. The final candidate contains 1,653 provenance-bearing evidence rows and 211 QC rows. The unchanged surgery/event counts are an important regression check: none of the new refusal, observation, diagnostic, or unrelated-operation paths created a completed AAOCA surgery event.
+
+The additive `overall_treatment_status` makes the AAOCA-specific boundary explicit. Its final distribution is 141 surgery, 12 intended surgery, 17 conservative and 60 unknown. The 141 surgery patients consist of 111 with completed AAOCA surgery evidence and 30 whose only completed operation evidence is non-AAOCA. This permits a VSD/PFO-only case to say that surgery actually occurred without changing `observed_management=unknown` or fabricating an AAOCA treatment relationship.
 
 ## Unknown provenance correction
 
 The first correction batch intentionally left a detailed VSD/PFO/ASD operation as `unknown` when the record did not state whether the coronary anomaly was treated. The status is correct, but the v1 summary made such cases harder to review because an unrelated operation was not selected as primary evidence and the generic unknown queue could have an empty evidence list.
 
-The final v1.1 candidate now uses a diagnostic-procedure assertion as the primary unknown evidence when available, otherwise the strongest `unrelated_completed` assertion. It also adds `unrelated_completed_operation_not_aaoca_management` to the patient review reasons and a dedicated `unrelated_operation_without_aaoca_management` QC row. Eighteen of the 77 remaining `unknown` patients have this completed-other-operation boundary. Their statuses, `actual_aaoca_surgery=unknown`, evidence assertions, and the AAOCA surgery-event table are unchanged; only review traceability and QC routing changed.
+The final v1.1 candidate now uses a diagnostic-procedure assertion as the primary unknown evidence when available, otherwise the strongest `unrelated_completed` assertion. It also adds `unrelated_completed_operation_not_aaoca_management` to the patient review reasons and a dedicated `unrelated_operation_without_aaoca_management` QC row. Eighteen of the 78 remaining AAOCA-management `unknown` patients have this completed-other-operation boundary. They now have `overall_treatment_status=surgery`; their AAOCA-specific status, `actual_aaoca_surgery=unknown`, evidence assertions, and the AAOCA surgery-event table remain unchanged.
 
-## Acceptance at correction batch 1
+## Independent-review safety pass
 
-- full repository suite: 77/77 tests passed;
+Three read-only AGY tasks using `gemini-3.8-flash-high` independently reviewed case/prediction pairs, the rule implementation and public clinical abstraction literature. The case review supported the two intended relabels and the strict non-AAOCA boundary for VSD/PFO-only surgery. The literature review independently supported separating targeted AAOCA repair, surgical intent, diagnostic catheterisation, active surveillance and unrelated congenital-heart operations.
+
+The code review identified concrete risks that were reproduced locally before acceptance. The final implementation therefore:
+
+- compares equal-date decisions by document section and exact assertion offset instead of treating date equality as sufficient chronology;
+- prevents routine follow-up text in the same section from overriding explicit surgery refusal;
+- requires local AAOCA context for new observation/pending-operation rules and removes a duplicate generic intent hit when a more specific multidisciplinary rule already applies;
+- rejects copied imaging boilerplate such as “please correlate with CT; follow up” as a clinical conservative-management decision;
+- downgrades copied imaging labels containing “untreated” to medium strength, preserving a conservative stage while keeping the actual-surgery tri-state unknown;
+- validates exact assertion spans, summary/evidence booleans, unrelated-operation summaries, overall-treatment state and every `actual_aaoca_surgery=no` claim's high-strength support.
+
+## Final acceptance
+
+- full repository suite: 78/78 tests passed;
 - base `v0.1_full` validator: 0 errors, 0 warnings;
-- candidate management-package validator: 230 patients, 1,656 evidence rows, 112 surgery events, 0 errors, 0 warnings;
+- candidate management-package validator: 230 patients, 1,653 evidence rows, 112 surgery events, 0 errors, 0 warnings;
 - all changed patient-level states and all hits from new rule families were inspected locally against source sections;
 - no patient content was placed in this report or in public literature queries.
 
