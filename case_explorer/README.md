@@ -17,13 +17,14 @@
 
 当 `--data-root` 下出现多个兼容 snapshot 时，API 会动态列出并支持运行期切换。活动 snapshot 的索引或 metadata 发生变化时，服务按间隔重新检查，在新数据完整可读后原子替换内存视图；若新文件暂时不完整，则保留上一份可用视图并暴露 `reload_error`。
 
-可选 management sidecar 不是按目录名盲目接入：只有其 metadata 中的 `run_metadata`、`patient_manifest` 与 `section_index` SHA256 全部匹配当前 snapshot 时才会加载。
+可选 management sidecar 不是按目录名盲目接入：只有其 metadata 中的 `run_metadata`、`patient_manifest` 与 `section_index` SHA256 全部匹配当前 snapshot 时才会加载。`management_summary.csv` 为稳定入口；`surgery_events.csv` 与 `management_evidence.csv` 均为可选扩展，缺失时界面自动降级。
 
 ## 界面
 
-- **数据总览**：当前规模、文书构成、文本来源、日期覆盖、管理方式与病例入口；年份、类别和计数均来自活动 snapshot。
-- **病例浏览**：患者搜索、动态筛选与排序；单例页提供时间线、来源文档、全部章节、按需正文和原 PDF 页定位。
-- **窄屏模式**：选择病例后进入专注阅读，并可一键返回病例列表；章节查看器独立滚动，关闭后回到原上下文。
+- **数据总览**：文书规模、来源、日期覆盖，以及 AAOCA 管理、总体治疗、其他心脏操作和研究复核优先级。
+- **病例浏览**：支持按新增 management 字段动态筛选；处置概览呈现双轨结论、手术事件、其他操作情境和逐条证据。
+- **证据核查**：证据卡直达来源章节，检查器显示关联断言并高亮对应句段；正文与 PDF 仍按需加载。
+- **窄屏模式**：病例列表、处置详情和章节检查器采用专注视图，长页保留吸顶 Tab 与返回入口。
 
 界面不加载 CDN，不预取全部正文。概览和列表只使用索引字段，点击章节时才读取对应 JSON，点击 PDF 时才流式读取源文件。
 
@@ -47,14 +48,14 @@ python -X utf8 -m case_explorer `
 python -X utf8 -m case_explorer --run data/derived/v0.1_full --include-identifiers
 ```
 
-此开关只控制 linkage 表的加载和显式身份标签；section 原文及原 PDF 本身仍可能含直接身份信息，因此整个应用始终属于受限临床数据界面，不能公开托管或把 URL 暴露到非本机网络。
+此开关只控制 linkage 表的加载和显式身份标签；服务仍固定绑定本机 loopback。
 
 ## API
 
 - `GET /api/health`：活动 snapshot 与热重载状态。
 - `GET /api/bootstrap`：snapshot、动态 schema/capabilities、overview 聚合、可用 runs。
-- `GET /api/patients`：支持搜索、section type、解析状态、management、复核状态、排序和分页。
-- `GET /api/patients/{patient_id}`：患者 manifest、文档、全部 section 元数据、时间线及匹配 sidecar。
+- `GET /api/patients`：支持搜索、section type、解析状态、AAOCA 管理、总体治疗、其他心脏操作、研究复核优先级、复核状态、排序和分页。
+- `GET /api/patients/{patient_id}`：患者 manifest、文档、section、时间线、management summary、手术事件与逐条处置证据。
 - `GET /api/sections/{section_id}`：按需读取 section JSON 原文与证据定位。
 - `GET /api/documents/{document_id}/pdf`：只读流式返回原 PDF，支持浏览器 Range 请求。
 - `POST /api/runs/select`：在已经发现并通过兼容性检查的 snapshot 间原子切换。

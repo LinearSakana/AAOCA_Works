@@ -139,6 +139,7 @@ class SidecarBundle:
     metadata: dict[str, Any]
     summaries: dict[str, dict[str, str]]
     events: dict[str, list[dict[str, str]]]
+    evidence: dict[str, list[dict[str, str]]]
     columns: dict[str, list[str]]
 
 
@@ -293,15 +294,25 @@ class SnapshotData:
         summaries, summary_columns = _read_csv(directory / "management_summary.csv")
         events_path = directory / "surgery_events.csv"
         events, event_columns = _read_csv(events_path) if events_path.is_file() else ([], [])
+        evidence_path = directory / "management_evidence.csv"
+        evidence, evidence_columns = _read_csv(evidence_path) if evidence_path.is_file() else ([], [])
         event_map: dict[str, list[dict[str, str]]] = defaultdict(list)
         for row in events:
             event_map[row.get("patient_id", "")].append(row)
+        evidence_map: dict[str, list[dict[str, str]]] = defaultdict(list)
+        for row in evidence:
+            evidence_map[row.get("patient_id", "")].append(row)
         return SidecarBundle(
             path=directory,
             metadata=metadata,
             summaries={row.get("patient_id", ""): row for row in summaries if row.get("patient_id")},
             events=dict(event_map),
-            columns={"management_summary.csv": summary_columns, "surgery_events.csv": event_columns},
+            evidence=dict(evidence_map),
+            columns={
+                "management_summary.csv": summary_columns,
+                "surgery_events.csv": event_columns,
+                "management_evidence.csv": evidence_columns,
+            },
         )
 
     def _build_patient_rows(self) -> list[dict[str, Any]]:
@@ -339,7 +350,10 @@ class SnapshotData:
                     "undated_sections": undated,
                     "date_review_sections": review_dates,
                     "management": management.get("observed_management", "") if management else "",
+                    "overall_treatment_status": management.get("overall_treatment_status", "") if management else "",
                     "actual_aaoca_surgery": management.get("actual_aaoca_surgery", "") if management else "",
+                    "other_cardiac_procedure_status": management.get("other_cardiac_procedure_status", "") if management else "",
+                    "review_priority": management.get("complex_case_review_priority", "") if management else "",
                     "management_confidence": management.get("management_confidence", "") if management else "",
                     "review_required": _as_bool(management.get("review_required")) if management else None,
                     "_search": "\n".join(search_values).casefold(),
@@ -373,11 +387,17 @@ class SnapshotData:
             if len(date) >= 4 and date[:4].isdigit():
                 timeline_years[date[:4]] += 1
         management_counts = Counter()
+        overall_treatment_counts = Counter()
         surgery_counts = Counter()
+        other_procedure_counts = Counter()
+        review_priority_counts = Counter()
         if self.sidecar:
             for row in self.sidecar.summaries.values():
                 management_counts[row.get("observed_management") or "unknown"] += 1
+                overall_treatment_counts[row.get("overall_treatment_status") or "unknown"] += 1
                 surgery_counts[row.get("actual_aaoca_surgery") or "unknown"] += 1
+                other_procedure_counts[row.get("other_cardiac_procedure_status") or "unknown"] += 1
+                review_priority_counts[row.get("complex_case_review_priority") or "unknown"] += 1
 
         summary = self.metadata.get("summary", {})
         return {
@@ -389,6 +409,8 @@ class SnapshotData:
                 "pages": sum(_as_int(row.get("page_count")) for row in canonical_documents),
                 "sections": len(self.sections),
                 "timeline_events": len(self.timeline),
+                "surgery_events": sum(len(rows) for rows in self.sidecar.events.values()) if self.sidecar else 0,
+                "management_evidence": sum(len(rows) for rows in self.sidecar.evidence.values()) if self.sidecar else 0,
             },
             "section_types": section_types,
             "patient_parse_statuses": _counter_rows(Counter(row["parse_status"] for row in self.patient_rows)),
@@ -403,7 +425,10 @@ class SnapshotData:
                 {"key": year, "count": timeline_years[year]} for year in sorted(timeline_years)
             ],
             "management_statuses": _counter_rows(management_counts) if self.sidecar else [],
+            "overall_treatment_statuses": _counter_rows(overall_treatment_counts) if self.sidecar else [],
             "surgery_statuses": _counter_rows(surgery_counts) if self.sidecar else [],
+            "other_procedure_statuses": _counter_rows(other_procedure_counts) if self.sidecar else [],
+            "review_priorities": _counter_rows(review_priority_counts) if self.sidecar else [],
             "quality": {
                 "sections_without_reliable_date": sum(
                     not (row.get("section_date") or row.get("document_timestamp") or row.get("document_date"))
@@ -519,6 +544,9 @@ class SnapshotData:
             "capabilities": {
                 "identifiers_loaded": bool(self.identities),
                 "management_sidecar": self.sidecar is not None,
+                "management_evidence": bool(
+                    self.sidecar and self.sidecar.columns.get("management_evidence.csv")
+                ),
                 "timeline_source": "patient_timeline.csv" if self.columns["patient_timeline.csv"] else "derived_from_sections",
                 "source_pdf": any(row.get("source_pdf") for row in self.documents),
                 "hot_reload": True,
@@ -531,6 +559,13 @@ class SnapshotData:
                 "text_sources": [row["key"] for row in self.overview["text_sources"]],
                 "patient_parse_statuses": [row["key"] for row in self.overview["patient_parse_statuses"]],
                 "management_statuses": [row["key"] for row in self.overview["management_statuses"]],
+                "overall_treatment_statuses": [
+                    row["key"] for row in self.overview["overall_treatment_statuses"]
+                ],
+                "other_procedure_statuses": [
+                    row["key"] for row in self.overview["other_procedure_statuses"]
+                ],
+                "review_priorities": [row["key"] for row in self.overview["review_priorities"]],
             },
             "overview": self.overview,
             "runs": runs,
@@ -540,6 +575,7 @@ class SnapshotData:
                 "ruleset_version": self.sidecar.metadata.get("ruleset_version", "") if self.sidecar else "",
                 "method": self.sidecar.metadata.get("method", "") if self.sidecar else "",
                 "source_hash_match": True if self.sidecar else None,
+                "tables": self.sidecar.columns if self.sidecar else {},
             },
         }
 
@@ -550,6 +586,9 @@ class SnapshotData:
         section_type: str = "",
         parse_status: str = "",
         management: str = "",
+        overall_treatment: str = "",
+        review_priority: str = "",
+        other_procedure_status: str = "",
         review_required: str = "",
         sort: str = "latest_desc",
         offset: int = 0,
@@ -565,6 +604,14 @@ class SnapshotData:
             filtered = (row for row in filtered if row["parse_status"] == parse_status)
         if management:
             filtered = (row for row in filtered if row["management"] == management)
+        if overall_treatment:
+            filtered = (row for row in filtered if row["overall_treatment_status"] == overall_treatment)
+        if review_priority:
+            filtered = (row for row in filtered if row["review_priority"] == review_priority)
+        if other_procedure_status:
+            filtered = (
+                row for row in filtered if row["other_cardiac_procedure_status"] == other_procedure_status
+            )
         if review_required in {"true", "false"}:
             expected = review_required == "true"
             filtered = (row for row in filtered if row["review_required"] is expected)
@@ -631,6 +678,7 @@ class SnapshotData:
         }
         management = self.sidecar.summaries.get(patient_id) if self.sidecar else None
         events = self.sidecar.events.get(patient_id, []) if self.sidecar else []
+        evidence = self.sidecar.evidence.get(patient_id, []) if self.sidecar else []
         public_manifest = {
             key: value
             for key, value in patient.items()
@@ -647,6 +695,7 @@ class SnapshotData:
             "text_source_counts": _counter_rows(Counter(row["text_source"] for row in section_public)),
             "management": management or {},
             "surgery_events": events,
+            "management_evidence": evidence,
         }
 
     @lru_cache(maxsize=128)
@@ -820,7 +869,12 @@ class SnapshotRegistry:
         if self.include_identifiers:
             paths.append(run_path / "private" / "patient_linkage.csv")
         if self.sidecar_root.exists():
-            for name in ("run_metadata.json", "management_summary.csv", "surgery_events.csv"):
+            for name in (
+                "run_metadata.json",
+                "management_summary.csv",
+                "surgery_events.csv",
+                "management_evidence.csv",
+            ):
                 paths.extend(self.sidecar_root.rglob(name))
         signature = []
         for path in sorted(set(paths), key=lambda item: str(item).casefold()):

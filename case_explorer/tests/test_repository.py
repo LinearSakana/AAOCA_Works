@@ -127,7 +127,7 @@ def build_run(root: Path, name: str, *, finished_at: str, extra_patient: bool = 
     return run
 
 
-def build_sidecar(root: Path, run: Path) -> Path:
+def build_sidecar(root: Path, run: Path, *, with_evidence: bool = True) -> Path:
     sidecar = root / "management_dynamic"
     write_csv(
         sidecar / "management_summary.csv",
@@ -135,13 +135,41 @@ def build_sidecar(root: Path, run: Path) -> Path:
             {
                 "patient_id": "p_alpha",
                 "observed_management": "future_state",
+                "overall_treatment_status": "future_treatment",
                 "actual_aaoca_surgery": "unknown",
+                "other_cardiac_procedure_status": "future_procedure_state",
+                "complex_case_review_priority": "future_priority",
                 "management_confidence": "medium",
                 "review_required": "True",
+                "procedure_types": '["future_procedure"]',
+                "other_procedure_contexts": "[]",
             }
         ],
     )
-    write_csv(sidecar / "surgery_events.csv", [])
+    write_csv(
+        sidecar / "surgery_events.csv",
+        [
+            {
+                "patient_id": "p_alpha",
+                "surgery_event_id": "surg_future",
+                "surgery_date": "2024-02-03",
+                "primary_section_id": "sec_new_type",
+            }
+        ],
+    )
+    if with_evidence:
+        write_csv(
+            sidecar / "management_evidence.csv",
+            [
+                {
+                    "patient_id": "p_alpha",
+                    "evidence_id": "mge_future",
+                    "assertion": "future_assertion",
+                    "section_id": "sec_new_type",
+                    "evidence_text": "Future management evidence",
+                }
+            ],
+        )
     (sidecar / "run_metadata.json").write_text(
         json.dumps(
             {
@@ -175,11 +203,24 @@ class SnapshotRegistryTests(unittest.TestCase):
         self.assertIn("future_subtype", bootstrap["schema"]["section_subtypes"])
         self.assertEqual(bootstrap["capabilities"]["timeline_source"], "derived_from_sections")
         self.assertTrue(bootstrap["capabilities"]["management_sidecar"])
+        self.assertTrue(bootstrap["capabilities"]["management_evidence"])
         self.assertIn("future_state", bootstrap["schema"]["management_statuses"])
-        patients = registry.snapshot().list_patients(section_type="future_new_type", management="future_state")
+        self.assertIn("future_treatment", bootstrap["schema"]["overall_treatment_statuses"])
+        self.assertIn("future_priority", bootstrap["schema"]["review_priorities"])
+        self.assertEqual(bootstrap["overview"]["overall_treatment_statuses"][0]["count"], 1)
+        patients = registry.snapshot().list_patients(
+            section_type="future_new_type",
+            management="future_state",
+            overall_treatment="future_treatment",
+            review_priority="future_priority",
+            other_procedure_status="future_procedure_state",
+        )
         self.assertEqual(patients["total"], 1)
+        self.assertEqual(patients["rows"][0]["overall_treatment_status"], "future_treatment")
         detail = registry.snapshot().patient_detail("p_alpha")
         self.assertEqual(detail["timeline"][0]["section_id"], "sec_new_type")
+        self.assertEqual(detail["surgery_events"][0]["surgery_event_id"], "surg_future")
+        self.assertEqual(detail["management_evidence"][0]["evidence_id"], "mge_future")
         section = registry.snapshot().section_detail("sec_new_type")
         self.assertEqual(section["text"], "Example future section text")
         self.assertEqual(section["extra_fields"]["future_json_field"], {"available": True})
@@ -226,6 +267,15 @@ class SnapshotRegistryTests(unittest.TestCase):
         (sidecar / "run_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
         registry = SnapshotRegistry(self.root, run=run)
         self.assertFalse(registry.bootstrap()["capabilities"]["management_sidecar"])
+
+    def test_management_evidence_remains_optional(self) -> None:
+        run = build_run(self.root, "run_a", finished_at="2026-01-01T00:00:00Z")
+        build_sidecar(self.root, run, with_evidence=False)
+        registry = SnapshotRegistry(self.root, run=run)
+        bootstrap = registry.bootstrap()
+        self.assertTrue(bootstrap["capabilities"]["management_sidecar"])
+        self.assertFalse(bootstrap["capabilities"]["management_evidence"])
+        self.assertEqual(registry.snapshot().patient_detail("p_alpha")["management_evidence"], [])
 
 
 if __name__ == "__main__":

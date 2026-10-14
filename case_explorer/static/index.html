@@ -92,11 +92,16 @@
             <section id="management-panel" class="panel management-panel" aria-labelledby="management-title">
               <div class="panel-heading">
                 <div>
-                  <h3 id="management-title">观察到的管理方式</h3>
+                  <h3 id="management-title">处置概览</h3>
                 </div>
-                <span class="method-chip">规则提取</span>
+                <div class="panel-heading-meta"><span id="management-total" class="panel-note"></span><span class="method-chip">规则提取</span></div>
               </div>
-              <div id="management-chart"></div>
+              <div class="management-overview-grid">
+                <div><h4>AAOCA 管理</h4><div id="management-chart"></div></div>
+                <div><h4>总体治疗</h4><div id="overall-treatment-chart"></div></div>
+                <div><h4>其他心脏操作</h4><div id="other-procedure-chart"></div></div>
+                <div><h4>研究复核优先级</h4><div id="review-priority-chart"></div></div>
+              </div>
             </section>
           </div>
 
@@ -115,7 +120,6 @@
           <aside class="cohort-panel" aria-labelledby="cohort-panel-title">
             <div class="cohort-heading">
               <div>
-                <p class="eyebrow">Patient cohort</p>
                 <h2 id="cohort-panel-title">病例列表</h2>
               </div>
               <span id="cohort-count" class="count-chip">—</span>
@@ -130,7 +134,10 @@
               <div class="filter-grid">
                 <label>文书类型<select id="section-type-filter"><option value="">全部类型</option></select></label>
                 <label>解析状态<select id="parse-status-filter"><option value="">全部状态</option></select></label>
-                <label id="management-filter-wrap">管理方式<select id="management-filter"><option value="">全部状态</option></select></label>
+                <label id="management-filter-wrap">AAOCA 管理<select id="management-filter"><option value="">全部状态</option></select></label>
+                <label id="overall-treatment-filter-wrap">总体治疗<select id="overall-treatment-filter"><option value="">全部状态</option></select></label>
+                <label id="other-procedure-filter-wrap">其他心脏操作<select id="other-procedure-filter"><option value="">全部状态</option></select></label>
+                <label id="review-priority-filter-wrap">复核优先级<select id="review-priority-filter"><option value="">全部级别</option></select></label>
                 <label>排序<select id="patient-sort">
                   <option value="latest_desc">最近记录优先</option>
                   <option value="sections_desc">文书丰富度</option>
@@ -139,7 +146,7 @@
               </div>
               <label id="review-filter-wrap" class="check-filter">
                 <input id="review-filter" type="checkbox" />
-                <span>仅看需人工复核</span>
+                <span>仅看需研究复核</span>
               </label>
             </div>
 
@@ -157,6 +164,8 @@
             <div id="case-content" hidden>
               <header id="patient-header" class="patient-header"></header>
               <nav id="case-tabs" class="case-tabs" aria-label="病例内容">
+                <button class="mobile-tab-back" type="button" data-show-cohort aria-label="返回病例列表">←</button>
+                <button id="management-tab-button" type="button" data-case-tab="management" hidden>处置概览</button>
                 <button type="button" data-case-tab="timeline" class="is-active" aria-current="page">时间线</button>
                 <button type="button" data-case-tab="documents">来源文档</button>
                 <button type="button" data-case-tab="sections">全部章节</button>
