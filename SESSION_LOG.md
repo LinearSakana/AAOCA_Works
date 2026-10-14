@@ -1,223 +1,101 @@
-# Session log — 2026-09-25 — AAOCA text pipeline v0.1
+# AAOCA 项目阶段记录
 
-## Scope and privacy
+这份文件只保留会影响后续研究和维护的阶段性决策。逐条命令、文件摘要、测试明细、临时排错和机器回执不在这里重复；当前使用方法以 [项目文档](docs/README.md) 和根目录 [README](README.md) 为准。
 
-Read `CONTEXT.md` first and treated it as the project contract. Inspected `data/sample_list/AAOCA_患者病例_清洗后.csv`, `data/sample_raw`, and `E:/Kenkyu-Shiryou/AAOCA Cases` read-only. No original file was edited. No patient content was sent to an external API; no LLM was used. Public Python packages and public OCR model weights were downloaded separately from patient processing, then all inference ran locally.
+## 当前基线（2026-10-14）
 
-## Work completed
+- 基础快照：232 位患者、365 个 PDF 来源路径、342 份唯一 PDF、13,485 页、13,931 个 sections、10,341 条患者时间线记录。
+- 相关性分流：230 位自动判为相关、2 位无法判断；62 位进入例外人工队列，其中 60 位暂列自动相关、2 位无法判断，人工复核尚未开始。
+- Management：当前纳入的 230 位患者由 170 位普通病例和上述 60 位待复核例外病例组成。AAOCA 专属状态为 111 surgery、11 intended surgery、31 conservative、77 unknown；总体治疗状态为 158/9/17/46；实际 AAOCA 手术为 111 yes、14 no、105 unknown；共整理 112 个去重手术事件。
+- Gold Set：已固定抽取 48 页，尚无完成人工标注的修订版，因此没有真实 OCR、分段或临床抽取准确率。
+- LLM：正式目录只有准备好的请求，没有真实患者级 response 或 hybrid 结论。
 
-1. Audited the cohort CSV, sample PDFs and all available PDFs. Confirmed 232 cohort rows, 365 PDF paths, 342 unique contents, 23 sample/original exact duplicates, 232 record bundles and 110 laboratory bundles.
-2. Implemented deterministic patient pseudonyms, exact filename/identifier matching, stable hospital URL header matching, identity conflict quarantine, source hashing and exact duplicate retention/canonicalization.
-3. Implemented page-preserving PyMuPDF extraction with off-MediaBox recovery, geometry/paint diagnostics, quality statuses, vector-outline detection and pypdf exception fallback.
-4. Diagnosed the Chrome/Quartz failure mode: visible Chinese is stored as vector outlines. Compared PyMuPDF/pypdf/pdfplumber and confirmed none can recover those semantics from the text layer.
-5. Implemented reversible normalization with raw/OCR separation, Unicode/space cleanup, conservative browser-chrome removal, removed-line receipts and normalized-to-source line maps.
-6. Installed RapidOCR/ONNX Runtime/OpenCV locally, prepared SHA-pinned PP-OCR v6 models, and added explicit local-only OCR with line geometry, confidence, provenance, atomic document caches and resumable process workers.
-7. Compared PP-OCR v4/v5/v6 on the same 12-page set plus a progress-note control. Kept v6 based on aggregate speed and proxy results. Blocked network calls during an inference verification.
-8. Ran a 20-page OCR integration probe, then processed all 8,216 target pages. Recovered nonempty OCR text on 8,202 pages; 14 stayed empty. The complete OCR pass took 8,796.803 seconds.
-9. Implemented rule-based document/section segmentation, date evidence/precision, mentioned-date roles, page/line/character spans, unknown-section retention, clinical-stage hints and leakage warnings.
-10. Iterated after real failures: fixed cross-line identifier parsing that had falsely quarantined 43 PDFs; separated historical internal IDs from the stable export envelope; removed browser print-time contamination from 906 laboratory sections; supported day-only laboratory dates; prevented short repeated progress headings with different dates from merging; and handled a bounded OCR-joined date/time form.
-11. Built patient/document/page/section indexes, patient timeline, cutoff export, source inventory, private linkage evidence and automated QC tables.
-12. Added an independent artifact validator and synthetic/end-to-end tests. Fixed unreadable-file empty-SHA grouping, final hash permission handling, output/cache overlap, nested link-to-raw protection, duplicate-content identity conflicts and failed-run receipts.
-13. Rebuilt the final outputs using all OCR caches in 73.159 seconds. Verified source hashes, code stability during the run, section coverage and all cross-table/artifact references.
+这些数量是当前正式包的口径。早期运行或周报中的旧数量只用于说明当时进度，不应与当前分母混用。
 
-## Final data facts
+## 2026-09-25：基础文字流水线
 
-- 231/232 patients have a matched PDF; 341/342 unique PDFs match the cohort.
-- One patient has no PDF in scope; one unique PDF is not in the cohort.
-- Raw text-layer status: 142 ok, 1 partial, 198 unusable for Chinese, 1 empty.
-- Effective status after targeted OCR: 142 native ok, 199 OCR/partial, 1 empty.
-- 13,485 pages; 8,102,527 raw text characters; 7,732,111 OCR characters; 13,261,480 normalized characters.
-- 13,234 sections: 4,650 progress, 3,779 laboratory, 2,698 administrative, 709 surgery-related, 374 consultation, 367 unknown, 333 admission and 324 discharge.
-- 9,725 dated sections; 3,509 unknown/uncertain dates; 5,454 OCR-derived dated sections require review.
-- 9,704 patient timeline events across 231 patients.
-- Section coverage errors: 0 uncovered nonempty lines and 0 multiply assigned nonempty lines.
-- Source integrity verification passed. Independent output validation passed with 0 errors/0 warnings. All 50 tests passed.
+完成了从患者索引表和医院 PDF 到页面、section、时间线与 QC 的首个可运行版本。关键决策包括：
 
-## Files created or changed
+- 原始 CSV/PDF 只读，患者内容不发送到外部服务；
+- 患者匹配只使用稳定标识与明确页头证据，冲突进入隔离，不做姓名模糊合并；
+- 精确重复 PDF 保留来源路径，但临床内容只处理一次；
+- 原生 PDF 文字、OCR 文字和规范化文字分开保存，可回到原页面和行位置；
+- 日期区分文书、检验、采样、打印、历史和计划操作语义；冲突与无法判断保持未知；
+- 时间线是带日期的 section 序列，不是临床事件金标准；没有 `available_at` 时不能声称数据天然无泄漏。
 
-- Project/config: `pyproject.toml`, `requirements.txt`, `requirements-ocr.txt`, `.gitignore`, `config/pipeline.sample.json`, `config/pipeline.full.json`, `config/pipeline.ocr.json`.
-- Package: `src/__init__.py`, `src/aaoca_pipeline/__init__.py`, `__main__.py`, `io_utils.py`, `matching.py`, `extraction.py`, `local_ocr.py`, `ocr_runner.py`, `normalization.py`, `structure.py`, `timeline.py`, `quality_control.py`, `pipeline.py`, `enrichment.py`.
-- Validation: `scripts/validate_outputs.py`, `tests/test_matching.py`, `tests/test_extraction.py`, `tests/test_structure.py`, `tests/test_pipeline.py`.
-- Documentation: `README.md`, `reports/matching_investigation.md`, `reports/extraction_investigation.md`, `reports/structure_investigation.md`, `reports/validation_iteration_02_full_text.json`, `reports/validation_v0.1_full.json`, `reports/pipeline_v0.1_summary.md`, `SESSION_LOG.md`.
-- Public models: `models/rapidocr/*` for the selected v6 runtime and `models/ocr_benchmark/{v4,v5,v6}/*` for comparison.
-- Derived data: `data/derived/v0.1_full/`; development iterations and caches under `data/derived/iteration_*` and `data/derived/extraction_cache/`.
+实际数据揭示了一个重要来源差异：大量 Chrome/Quartz PDF 把中文保存为矢量轮廓，普通解析库只能看到数字和拉丁字符。项目因此采用本地目标 OCR，并保留 14 个仍为空的页面供后续复核。检验表的行文字已保存，但项目、结果、单位和参考范围的单元格关系仍未经过人工验证。
 
-All data/model/scratch/output directories are excluded from Git by `.gitignore`; project reports contain only aggregate counts and anonymous artifact IDs.
+同日建立 Gold Set 工具链，覆盖分层抽样、逐页 review、冻结人工版本、文字/分段/类型/日期评分和版本比较。固定样本为原生/OCR × 病历/检验四层各 12 页。所有预填内容仍是 parser 预测，不能当作人工答案。
 
-## Commands actually run for final acceptance
+## 2026-09-26：相关性、实际管理与 LLM 接口
 
-```powershell
-python -X utf8 -m unittest discover -s tests -v
-python -X utf8 -m aaoca_pipeline --config config/pipeline.ocr.json
-python -X utf8 scripts/validate_outputs.py data/derived/v0.1_full --report reports/validation_v0.1_full.json
-python -X utf8 -m aaoca_pipeline --config config/pipeline.ocr.json --before 2024-01-01
-```
+### 相关性例外复核
 
-## Remaining issues
+项目问题被明确为“AAOCA 是否曾真正进入诊疗过程”，而不是“最终是否确诊”。后续检查排除 AAOCA 的患者仍可判为相关，因为排除本身证明该方向曾被考虑。
 
-- OCR transcription, section boundaries and dates need a clinician-reviewed reference set; current checks establish software and provenance integrity, not medical correctness.
-- Fourteen OCR pages remain empty; 28,558 OCR lines across 2,643 pages have model confidence below 0.8.
-- Laboratory table cell relationships are not reconstructed in v0.1.
-- 3,509 sections have unknown/uncertain dates and 367 have unknown type.
-- `available_at` and clinically valid prediction cutoffs remain unresolved; outcome-containing narrative must be excluded/reviewed before modeling.
-- The unmatched PDF, missing patient PDF and identifier discrepancies require source-owner reconciliation.
-- Clinical management extraction was left for the next iteration; no proposed/planned procedure has been mislabeled as completed surgery.
+全队列证据显示大多数患者具有多处明确相关证据，因此改为只交付例外病例，而不是要求人工重审全部患者。例外队列覆盖缺失来源、证据稀疏、始终疑似、解剖冲突和研究范围边界。Excel 工作簿只允许回写复核状态、最终判断和备注，不允许覆盖自动证据与来源定位。
 
-## 2026-09-25 — Gold Set annotation and evaluation extension
+### 实际管理与手术
 
-Read the current context, pipeline output/schema, validation code, tests and aggregate reports before implementation. Kept original PDF files and existing `data/derived/v0.1_full` output read-only. Added `gold_common.py` (SHA/page anchored stratified sampling, annotation checks, freeze), `gold_review.py` (loopback-only PDF-page review desk), `gold_evaluate.py` (text, boundary, section, type/subtype, date and failure metrics), `scripts/gold_set.py`, synthetic tests, a plain-language review guide and an evaluation specification. `README.md` and an aggregate sampling report were updated in the same batch.
+建立四类 AAOCA 管理状态：已完成手术、手术意向、明确保守管理、无法判断；同时单独保存“实际 AAOCA 手术是否发生”。核心边界从一开始就固定为：
 
-Ran the sampler on the real completed output with seed `20260925`: 48 pages across four equal native/OCR × record/lab strata, 24 routine and 24 challenge pages, 42 unique PDF contents and 41 pseudonymized patients. Stored manifest only under Git-ignored `data/gold_sets/aao_pdf_pages_v1/`; sample ID `81f579c39633ed326ca5`. No patient text was copied into tracked files. The sampled page labels are still parser predictions, not gold annotations.
+- 建议、计划、同意、术前讨论、拒绝和取消都不是手术完成；
+- 诊断性造影或导管检查不是治疗性 AAOCA 手术；
+- 没有找到手术记录不能推断为保守治疗或明确未手术；
+- 完成其他先心病手术不等于 AAOCA 已处理；
+- 重复术后记录应归并到同一手术事件。
 
-The synthetic tests verify exact edit distance, four-stratum sampling, completion validation, annotation freezing and digest tamper detection, boundary/section matching, print-date confusion attribution, and fair-comparison guards. Acceptance: `python -X utf8 -m unittest discover -s tests -v` passed 62 tests; `scripts/validate_outputs.py data/derived/v0.1_full` passed with 0 errors/0 warnings; `gold_set.py validate` found 48 sampled and 0 completed pages. A real local Playwright browser loaded the review page and PDF image, showed two predicted sections, saved a draft, and displayed without horizontal overflow at 900 px and 1280 px. The browser initially exposed a missing token on CSS/JS requests; it was fixed and a repeat check reported 0 console errors. The disposable draft and browser artifacts were removed after the smoke check. No real clinical accuracy can be reported until human reviewers finish and freeze an annotation revision.
+### Provider-neutral LLM 中间件
 
-### Follow-up hardening batch
+实现了请求准备、可替换 adapter、返回检查和独立 sidecar 对账。仓库不绑定模型、服务地址或密钥。模型必须引用请求中实际提供的证据；新发现和规则分歧只形成待人工复核的候选，不能静默覆盖确定性结果。
 
-Added same-PDF neighboring-page navigation to the review desk so reviewers can inspect dates at the start of a section that crosses a sampled page edge, while the annotation target remains the sampled page. Split source comparison into fixed baseline native/OCR strata and the evaluated run's actual extraction source. Extended synthetic tests to compare a deliberately improved parser run with completely renumbered document IDs against the identical frozen sample, and to confirm that uncertain text/type/subtype/date and unreviewable pages affect only their eligible score denominators. Documentation was updated with the new review navigation and grouping semantics. A fresh rerun of the real sampler produced the exact same `sample_id` and 48 unit records. A browser check loaded PDF page 18 as context while keeping sample page 17 as the annotation target, returned to the sample page, and reported 0 console errors; temporary browser artifacts were removed.
+## 2026-09-27：本地病例浏览器
 
-Acceptance after this batch: all 63 synthetic/end-to-end tests passed; working annotation validation still reports 48 sampled pages, 0 saved/complete pages. Gold accuracy remains pending actual PDF review.
+建立了只在本机回环地址运行的病例浏览器，用于浏览患者、时间线、文档章节、证据来源和原 PDF。界面按桌面、平板和手机宽度做过真实浏览器检查。
 
-### Failure-analysis usability batch
+这次工作确认了两个长期界面原则：检查器必须随时可以关闭并恢复空状态；面向研究人员的界面应使用中文临床含义，而不是暴露内部工程字段或规则 slug。浏览器只读取现有 snapshot，不修改临床输入或派生结果。
 
-Added direct review-desk jump by anonymous `unit_id` or 1-based sample position, so `failures` rows can be opened without paging through the whole sample. Corrected date-confusion attribution when gold confirms no event date but the parser adopts an annotated print/historical/planned date. Failure-mode aggregates now count multiple missed/extra boundaries by occurrence rather than by page while preserving page-level failure rows. Updated guides and added a synthetic regression for the no-event-date print case.
+## 2026-09-29：周报与 LLM 诊断试跑
 
-Acceptance: all 64 tests passed. A real browser opened the second sample by `&unit=pg_...`, jumped to sample 48 through the header input, loaded PDF images, and reported 0 console errors. Browser artifacts were removed. `gold_set.py validate` still reports 48 sampled, 0 saved, 0 complete; no real labels were invented for testing.
+制作了单页多屏周报、独立口播稿和本地演示启动器。周报允许在同一网页内导航，面向听众的文字只呈现结果、方法和下一步；演讲提示与操作说明保留在单独 Markdown 中。
 
-## 2026-09-26 — AAOCA relevance exception review, deterministic core
+同日的小规模 LLM 诊断试跑只收到 11 个返回，其中多数因引用无效、引文不一致或缺少人工复核标记而被拦截。该试跑使用旧请求和旧 management，既不是当前结果，也不能当作模型准确率。其长期结论只有：严格的来源引用、状态一致性和分歧复核不可省略。
 
-The requested patient-level relevance question was clarified as whether AAOCA or a corresponding coronary-origin abnormality ever became a meaningful direction of consideration, testing, discussion, differential diagnosis or exclusion—not whether it was ultimately confirmed. After direct corpus inspection showed that the hospital-screened cohort was overwhelmingly relevant, the task was narrowed to an exception-only human queue rather than relabeling every patient.
+## 2026-10-13：Management unknown 定向修正
 
-Added `aaoca_exceptions.py` with a provenance-bearing deterministic evidence contract, patient aggregation, exception reasons, direct-identifier linkage for local review, source-run SHA256 receipts and a future local-LLM middleware seam. Added `scripts/aaoca_exception_review.py` to build and validate an exception-only CSV package. The downstream stage reads the completed snapshot without modifying pipeline artifacts and accepts both legacy `surgery_related` and current `procedure` section types. Synthetic tests cover ordinary confirmed cases, no-PDF and nonclinical-only evidence, tentative workup, same-vessel origin conflict, pulmonary-origin scope, unrelated adequate records, explicit later exclusion, Chinese origin shorthand versus an explicit coronary branch, and human-field validation.
+针对 `unknown` 病例做分层源文书复核，发现几类原规则未覆盖的真实表达：多学科讨论后的明确拒绝、完成诊断后形成的观察决定、建议手术后家属暂缓，以及术中明确记录冠脉未处理。
 
-The real `v0.1_full` snapshot was independently validated immediately before the scan: 232 patients, 13,931 sections and 10,341 timeline events, with 0 errors and 0 warnings. Actual deterministic results were 230 automatic `yes`, 0 `no` and 2 `uncertain`. The two uncertain patients are one no-PDF patient and one patient with an empty record PDF plus a laboratory bundle whose nonclinical header is the only diagnosis evidence. The exception-only package contains 62 patients: 2 required, 46 high and 14 medium priority, with 654 selected evidence rows. The remaining 170 patients do not appear in the human deliverable. Review files remain under Git-ignored `data/review/aaoca_exception_review_v1/` because they contain direct identifiers and excerpts; only aggregate counts are tracked in `reports/aaoca_exception_scan_2026-09-26.md`. No LLM or external patient-data service was used.
+修正规则时保留了以下保护：普通随访、影像模板句、其他病变的手术/拒绝和仅完成 VSD/PFO/ASD 手术都不能自动建立 AAOCA 结论。同一天的纵向决定继续比较文书和原文位置；同一 section 的拒绝不能被附近普通随访措辞覆盖。
 
-### Exception-only workbook and review round trip
+为避免“患者确实做过手术”和“AAOCA 是否被处理”混为一谈，新增总体治疗状态。患者可以有已完成的其他手术，同时 AAOCA 管理与 AAOCA 手术状态仍为 unknown。
 
-Added an editable `AAOCA_exception_review.xlsx` view with three sheets: 62 exception patients, 654 evidence rows and a review guide. Ordinary patients appear only as the aggregate omitted count of 170. The case sheet highlights the three human-input columns and constrains status/final-label values; every evidence row retains patient, document, section, page, source path and JSON pointer. The workbook was exported with `@oai/artifact-tool`, reopened, inspected and rendered for every sheet; its formula-error scan returned zero matches. OCR control characters forbidden by OpenXML are sanitized only in the workbook display layer, not in source CSV or section data.
+独立 AI 辅助只读审阅（AGY）用于发现可复现的规则和验证缺口。所有建议都重新回到本地源 section 检查后才决定是否采纳；审阅结论不直接成为患者标签。
 
-Added `import-workbook` support that parses the saved OOXML using the Python standard library, requires an exact workbook/CSV patient-ID match, rejects formulas or invalid review values in the editable fields, and atomically copies only `review_status`, `final_aaoca_judgment` and `reviewer_notes` back to `exception_cases.csv`. Automatic judgments and evidence cannot be overwritten through this path. A synthetic workbook round-trip test and a smoke import of the actual 62-row workbook both passed. The stable machine interface remains the existing CSV package.
+## 2026-10-14：复杂操作、正式重建与兼容性收紧
 
-Final acceptance for this batch: all 70 tests passed; the original `v0.1_full` snapshot validator again passed 232 patients, 365 source documents, 342 canonical documents, 13,485 pages, 13,931 sections and 10,341 timeline events with 0 errors/0 warnings; the exception package validator passed 62 patients and 654 evidence rows with 0 errors; the final saved workbook round-tripped all 62 patient IDs and the workbook formula-error scan matched 0 cells. Human labels remain intentionally blank (`reviewed_patients=0`) pending actual review.
+### 复杂操作语境
 
-## 2026-09-26 — AAOCA actual management and surgery, deterministic v1
+新增逐操作的类型、操作方式和冠脉处置描述，以区分外科手术、治疗性导管操作、纯诊断操作、非心脏手术以及记录不清的情况。复杂先心病手术中的冠脉解剖、探查或 Button 转位只有在明确指向 AAOCA 靶向治疗时才建立 AAOCA 手术事件。
 
-Read the context, complete session history, current pipeline/schema/reports and real section data before designing the downstream stage. Kept raw PDFs and the completed `v0.1_full` snapshot read-only. Added `management.py` and `scripts/aaoca_management.py` to resolve the exception-only AAOCA cohort contract, extract provenance-bearing management assertions, deduplicate actual AAOCA surgery events, aggregate patient-level management and independently validate the package.
+三次 AI 辅助只读审阅覆盖复杂操作、纵向决策和分层病例。采纳内容包括较远距离但明确归属 AAOCA 的出院决定、跨行拒绝/暂缓、历史治疗性导管操作和编号术名串扰修正；拒绝把“未记载处理”强行解释成“明确未处理”，也拒绝把研究复核优先级解释为临床风险。
 
-The state model now distinguishes `surgery`, `intended_surgery`, `conservative` and `unknown`, with a separate tri-state `actual_aaoca_surgery`. A plan, recommendation, consent, preoperative discussion, cancellation, diagnostic coronary angiography or cardiac catheterisation cannot establish completed surgery. Missing surgery documentation cannot establish conservative treatment. High-strength explicit nonoperation can support surgery `no`; weaker follow-up/observation retains surgery `unknown`. Completed unrelated operations are preserved as auditable exclusion evidence.
+### 正式重建
 
-Real-data iteration fixed several observed failures: daily postoperative notes no longer create one event per document date; formal operation records anchor deduplication; distinct formal dates remain separate operations; VSD/ASD/valve procedures near an AAOCA diagnosis no longer become AAOCA intent; an electrophysiology contingency mentioning coronary revascularisation no longer becomes AAOCA surgery; a nonstandard outside-hospital “coronary ostial high-position operation” is retained as a month-precision historical event; coronary aneurysm repair is excluded from generic AAOCA repair; and `无手术禁忌症` is not confused with `无手术指征`. Dates preserve day/month precision and surface within-record conflicts.
+完整重跑基础流水线并重建相关性、management 和 LLM 请求包。原始患者与 section 内容保持稳定，正式 management 采用当前状态分布。Gold Set 仍没有人工完成页，相关性工作簿仍没有人工填写，因此没有增加临床准确率声明。
 
-The accepted local package under `data/derived/aaoca_management_rules_v1/` contains 230 included automatic-AAOCA-yes patients, 13,869 scanned sections, 1,619 evidence rows and 112 deduplicated AAOCA surgery events. Patient states are 111 surgery, 11 intended surgery, 20 conservative and 88 unknown. Actual AAOCA surgery is 111 yes, 9 explicit no and 110 unknown. One patient has two distinct surgery events. Of 112 events, 108 have an exact nonconflicting day, 3 retain date conflicts and 1 outside-hospital event has month precision only. Forty-two unrelated completed-operation rows across 41 patients and diagnostic-procedure evidence in 73 patients remain explicitly excluded from AAOCA surgery.
+### LLM 兼容性
 
-The QC queue contains 193 issue rows and covers all 183 `review_required` patients. The package contains exact source character spans plus document, section, page, source path and JSON pointer; validation reopens source sections and checks those spans, event support, state invariants, date states, source hashes, metadata counts and review coverage. The base snapshot validator passed 0 errors/0 warnings, the management validator passed 0 errors/0 warnings, and all 74 tests passed. Tracked documentation was added in `docs/aaoca_management.md` and `reports/aaoca_management_rules_v1_2026-09-26.md`; patient-level output remains Git-ignored and local. No LLM or external patient-data service was used in this batch.
+收紧了请求与来源包的绑定：上游摘要、证据、上下文范围或规则变化后，旧 response 不允许通过替换内部编号继续使用。对账保持独立，不修改确定性 CSV。恢复的旧试跑 response 与当前请求不兼容，已移出正式输出；当前正式路径只保留重新准备的请求。
 
-### Provider-neutral LLM middleware batch
+### 文档整理
 
-Added `management_llm.py` and `scripts/aaoca_management_llm.py` as a separate, provider-neutral layer. It prepares one-patient JSONL requests with deterministic summary/event/evidence context and exact source passages; exposes an injectable `StructuredManagementLLMClient`; validates request-scoped evidence IDs, passage quotes, state/date consistency and safety invariants; and writes a non-overwriting deterministic/LLM comparison sidecar. No SDK, endpoint, model, credential or network path is embedded. Routing (`unknown`, `ambiguous`, `review_required`, `all`), prompt text/version and context limits are configurable.
+将 `reports/` 收敛为周报专用目录。基础流水线、Gold Set、相关性、management 和 LLM 的长期说明统一进入 `docs/`；历史机器 JSON、文件摘要、逐次测试输出和重复验收报告不再作为人类文档保留。README 与周报来源链接同步指向新的长期文档。
 
-Response validation requires completed AAOCA surgery to have a related completed event and source support. New surgery, intent or conservative claims without corresponding verified deterministic evidence must request human review, and any deterministic/LLM disagreement must do the same. Reconciliation v1 records agreement or disagreement while preserving deterministic recommendation fields until review. Synthetic fake-client tests cover a valid planned-operation agreement, a possible newly found surgery that cannot auto-promote unknown, exact source citations, prompt override, hallucinated quote rejection and unsafe-disagreement rejection.
+## 仍需完成
 
-Ran only local request preparation on the real package. The default `ambiguous` route selected 124 patients: 5 surgery, 11 intended surgery, 20 conservative and 88 unknown. All 436 available deterministic evidence rows were included; 0 were omitted. The package contains 2,734 exact source passages and 2,778,830 characters. Context receipts mark 122 requests as section-context truncated, mainly because more than 24 candidate sections exist, while retaining all management evidence. Request/source validation passed 124 unique requests and all passages with 0 errors/0 warnings. Metadata records `llm_invoked=false`, `network_processing=false` and `endpoint_configured=false`; no real responses or hybrid labels exist.
-
-Acceptance after this batch: all 77 tests passed; the base snapshot validator, deterministic management validator and LLM request-package validator each passed with 0 errors and 0 warnings. Added `docs/aaoca_management_llm.md` and `reports/aaoca_management_llm_prototype_2026-09-26.md`. Patient request content remains Git-ignored and local.
-
-## 2026-09-27 — Dynamic case explorer, data/API foundation
-
-Read the project context, complete session history, current pipeline/schema, aggregate reports, the completed `v0.1_full` metadata and a small set of representative section records before designing a separate researcher-facing browser. Kept raw PDFs and all `data/derived` artifacts read-only. Added the standalone `case_explorer/` module using only the Python standard library; it does not import or modify pipeline internals.
-
-The data layer discovers compatible completed snapshots from `--data-root`, chooses or switches runs at runtime, dynamically derives categories and filters from current CSV headers/values, falls back from a missing timeline table to dated sections, and preserves additive fields as inspectable metadata. Core patient/document/section keys are validated explicitly. Source-file changes trigger a bounded check and atomic reload; a temporarily incompatible replacement leaves the last good snapshot available with a visible diagnostic. Optional management sidecars load only when their recorded SHA256 values for `run_metadata.json`, `patient_manifest.csv` and `section_index.csv` match the active snapshot.
-
-Added loopback-only JSON endpoints for overview, run selection, paginated patient filtering, patient detail, lazy section text and byte-range PDF streaming. Direct linkage identifiers are opt-in with `--include-identifiers`; the UI remains restricted clinical-data software because source text and PDFs may themselves contain identifiers. API responses are no-store and same-origin, with CSP and cross-origin POST rejection. Synthetic tests cover dynamic future section types/subtypes and management states, additive CSV/JSON fields, timeline fallback, run discovery/switching, atomic reload, hash-mismatched sidecar rejection and explicit failure on a missing core key. The visual frontend and real-browser acceptance are the next batch.
-
-### Researcher interface and browser acceptance
-
-Added the dependency-free responsive frontend under `case_explorer/static/`: a dynamic cohort overview, section/source/date/management visualizations, patient search and filters, longitudinal timeline, source-document cards, chapter search, lazy text inspector and original-PDF page links. No patient count, year, section category, extraction source, parse state or management state is fixed in the UI. Unknown future values retain a readable fallback. The desktop layout uses independent cohort/workspace/inspector columns; tablet and phone layouts use focused case reading, a direct return to the cohort and a scroll-locked chapter drawer.
-
-Kept interface copy short and neutral. Removed explanatory warning banners, repeated English headings, internal ruleset names, raw subtype labels and `Flagged` presentation. Research-relevant uncertainty remains available as compact source/date/review state and collapsible provenance rather than interruptive prose. Static assets are local, a favicon prevents stray requests, and the CSP was adjusted only for same-origin assets plus the inline CSS variables used by data-driven charts.
-
-The user explicitly requested AGY (`gemini-3.8-flash-high`) for bulk corpus/schema reading and for all subsequent page-by-page frontend inspection. Two early read-only AGY reviews informed the data contract and visual hierarchy. A dedicated unrestricted, no-edit browser acceptance session then exercised 1440×1000, 768×900 and 390×844 across overview, searching/filtering, patient selection, timeline filters, documents, chapter search, inspector open/close, PDF links, keyboard focus, long-text scrolling and overflow. It saved 17 Git-ignored screenshots and reported no P0 issue, no horizontal overflow or scroll penetration, and 0 console errors, warnings or failed requests. Under the user's explicit authorization the remote reviewer could see the locally rendered interface; its reports were required not to reproduce patient text or identifiers.
-
-That review found a desktop-only inability to clear the inspector and English engineering keys in expanded provenance. The close action now works by button or Escape at every width, clears selection and restores the empty inspector; provenance labels are Chinese and no longer expose the segmentation-rule slug. The same AGY conversation performed an 8-screenshot focused regression: desktop button/Escape reset passed, provenance scanning found no English field keys or rule slug, tablet/mobile close targets measured 44×44 px, scroll locking recovered correctly, and console/network failures remained zero. Its final verdict was fully passed and deliverable.
-
-Acceptance receipts: `node --check case_explorer/static/app.js` passed; all 5 explorer dynamic-compatibility tests passed; all 77 existing project tests passed; and `scripts/validate_outputs.py data/derived/v0.1_full` again passed with 0 errors/0 warnings for 232 patients, 365 source documents, 342 canonical documents, 13,485 pages, 13,931 sections and 10,341 timeline events. Browser artifacts remain under ignored `output/playwright/`; raw PDFs and all derived pipeline outputs were not modified.
-
-### Repository entrypoint documentation
-
-Updated the root `README.md` with the standalone browser's purpose, dynamic snapshot behavior, loopback URL, and copyable launch command, linking to `case_explorer/README.md` for the full contract. Included the pre-existing Markdown table-formatting cleanup in that same documentation commit; no pipeline or derived data changed.
-
-## 2026-10-13 — AAOCA management unknown failure audit, correction batch 1
-
-Reopened the deterministic management implementation and real source sections after concrete `unknown` failure reports. Kept raw PDFs, `v0.1_full`, and the relevance-review package read-only. Built all audit scripts and candidate outputs under Git-ignored `scratch/`; `.agy-staff/` was already excluded in `.git/info/exclude`.
-
-Generated a 33-case stratified baseline-unknown audit spanning refusal/cancellation terms, multidisciplinary observation, generic intent, possible AAOCA-operation language, unrelated operations, ordinary follow-up, and no-candidate records. Direct source review showed that the misses were not one class: explicit multidisciplinary refusal should become `intended_surgery`; a completed diagnostic catheterisation followed by a documented observation/follow-up decision should become `conservative`; and completed VSD/PFO surgery alone must remain non-AAOCA evidence rather than becoming `surgery` or automatically becoming `conservative`.
-
-Updated deterministic ruleset version to `aaoca_management_rules_v1.1`. Added bounded rules for multidisciplinary refusal, post-workup observation, recommendation followed by family deferral/discharge, no near-term intervention, and formal intraoperative coronary assessment explicitly documented as untreated. Added OCR line-wrap tolerance, a competing-lesion guard, a diagnostic “手术造影检查” negative boundary, section-date policy for management decisions, and an ordered trajectory rule so a later explicit observation decision can supersede earlier conditional intent without changing `actual_aaoca_surgery` to `no`.
-
-Expanded synthetic regression coverage with both positive and negative cases. The real candidate remained at 112 deduplicated AAOCA surgery events among 111 surgery patients. Patient states changed from `111 surgery / 11 intended / 20 conservative / 88 unknown` to `111 / 13 / 29 / 77`; transitions were 3 unknown-to-intended, 8 unknown-to-conservative, and 1 intended-to-conservative. `actual_aaoca_surgery` changed from `111 yes / 9 no / 110 unknown` to `111 / 12 / 107`; each added `no` has explicit coronary-not-treated wording.
-
-Batch-1 acceptance: all 77 repository tests passed; the base snapshot validator returned 0 errors/0 warnings; the candidate management validator returned 0 errors/0 warnings for 230 patients, 1,656 evidence rows and 112 surgery events. Tracked documentation was updated in `docs/aaoca_management.md` and `reports/aaoca_management_rules_v1_1_correction_2026-10-13.md`. Patient text remained local; no patient detail was used in public literature queries.
-
-### Unknown provenance correction batch
-
-Kept the VSD/PFO-only example and its corresponding rule boundary as `observed_management=unknown` and `actual_aaoca_surgery=unknown`: a completed non-AAOCA operation does not prove either AAOCA surgery or an affirmative conservative decision. Improved the review contract instead. Unknown summaries now point to diagnostic evidence when present, otherwise to the strongest completed unrelated-operation assertion. They add a specific review reason, and the QC queue adds `unrelated_operation_without_aaoca_management` with the exact evidence IDs.
-
-On the real candidate, 18 of 77 remaining unknown patients have completed unrelated-operation evidence. The change increased the QC queue from 191 to 209 rows without changing any patient state, actual-surgery state, evidence assertion, or surgery event. The three reported examples now resolve respectively to `intended_surgery / conservative / unknown`; the third has a nonempty primary evidence pointer and the explicit unrelated-operation QC boundary. The focused management suite passed 4/4 tests, and the rebuilt candidate validator passed 230 patients, 1,656 evidence rows and 112 surgery events with 0 errors/0 warnings.
-
-### Independent-review safety and overall-treatment batch
-
-Collected three AGY `gemini-3.8-flash-high` read-only deliveries at the acceptance point: a case/prediction audit, an implementation review, and a public-literature abstraction review. The case review agreed with the refusal and post-catheterisation observation relabels and with retaining AAOCA-specific `unknown` for VSD/PFO-only surgery. The code review exposed reproducible same-day chronology, refusal-plus-follow-up, copied-imaging and validator gaps; each accepted finding was checked against local sections before implementation. AGY made no workspace changes.
-
-Added exact assertion offsets while retaining the existing context excerpt offsets. Equal dates now fall through to document/section/assertion order, and a same-section refusal cannot be superseded by routine follow-up wording. New decision rules require local AAOCA context. Imaging boilerplate saying to correlate with CT/clinical findings and follow up is excluded, and copied ultrasound “untreated” labels are medium rather than high strength. The validator now checks assertion spans, patient-summary evidence flags, unrelated-operation summaries, overall-treatment state and high-strength support for every `actual_aaoca_surgery=no`.
-
-Added `overall_treatment_status` and `overall_treatment_rule` so completed non-AAOCA surgery is visible without corrupting AAOCA-specific management. The VSD/PFO-only example is now `overall_treatment_status=surgery` while correctly retaining `observed_management=unknown` and `actual_aaoca_surgery=unknown`, with the original operation name, primary evidence pointer and dedicated QC reason.
-
-The final candidate contains 230 patients, 1,653 evidence rows, 112 AAOCA surgery events and 211 QC rows. AAOCA-specific states are `111 surgery / 13 intended / 28 conservative / 78 unknown`; overall treatment states are `141 / 12 / 17 / 60`. Actual AAOCA surgery is `111 yes / 10 no / 109 unknown`. Relative to v1, AAOCA-specific transitions are 3 unknown-to-intended, 7 unknown-to-conservative and 1 intended-to-conservative; the diagnostic-only imaging-template false positive was returned to unknown. The focused suite passed 5/5 tests and candidate validation returned 0 errors/0 warnings.
-## 2026-10-14 — Complex management strata, correction batch 4
-
-Inspected all completed-other-operation names and the full source operation/discharge records for representative VSD/PFO and ASO cases. Added evidence-linked procedure modes/categories, per-procedure AAOCA handling, pending-decision/complex-operation context, and research review priority/reasons in `management_context.py`. A prior AAOCA repair cannot be attached to a different later operation. Missing handling stays not documented; copied imaging non-treatment stays a separate weak-source flag. New context assertions do not establish AAOCA surgery.
-
-Fixed a concrete mixed-procedure failure: nine patients had named therapeutic catheter intervention plus angiography, but the old diagnostic-first branch omitted their completed therapy. Their overall treatment is now surgery while AAOCA-specific status stays unchanged. Candidate v1.2: 230 patients, 1,608 evidence rows, 112 AAOCA events; AAOCA statuses 111/13/28/78 (surgery/intended/conservative/unknown); overall statuses 150/11/17/52; complexity priority 26 high/74 medium/130 routine. Fifteen focused tests and source-bound package validation passed (0 errors/warnings).
-
-Updated LLM request decoding/routing and prompt guidance for the additive fields; no endpoint or real model output was introduced. Added `.agy-staff/` to ignored artifacts. Three requested read-only Gemini 3.8 Flash High audits were interrupted/network-failed on first execution and resumed against the completed candidate after proxy recovery; their acceptance is still pending at this checkpoint. Formal outputs and the complete pipeline rerun follow after independent audit acceptance.
-
-Before the batch commit, added a validator tampering regression and confirmed 86/86 repository tests. Refined mixed-procedure extraction to retain both diagnostic and therapeutic assertions, rather than losing the actual angiography component; all 16 focused tests passed after that refinement. This preserves diagnostic evidence while adding the missing therapy and will increase evidence-row counts in the final rerun without changing patient states.
-
-### Independent audit acceptance, correction batch 5
-
-Collected all three resumed read-only Gemini 3.8 Flash High audits at the acceptance checkpoint: 36 observations across 33 unique patients (complex procedures, longitudinal decisions and stratified random cases). Verified specific disagreements against full source sections and retained only evidence-supported changes. No clinician gold-standard or accuracy claim is made. Rejected forced conservative-to-no inference, omitted-treatment-as-negative inference and clinical-risk interpretations of the research-review priority.
-
-Recovered distant discharge no-indication decisions only under unambiguous AAOCA diagnosis fields, including guards for multiline competing diagnoses and obstructive hypertrophic cardiomyopathy. Recovered wrapped deferrals and historical catheter valve implantation/ablation, and distinguished pericardial surgery from additional AAOCA repair. Prevented anatomical subtype text from bleeding into a subsequent numbered procedure. Added direct coronary-anatomy context while retaining uncertainty about intervention and causal purpose. Surgical intent without completion now carries at least medium research-review priority.
-
-Acceptance candidate: 230 patients, 1,695 evidence assertions, 112 AAOCA events and 340 QC rows; AAOCA states 111/11/31/77, overall states 158/9/17/46, actual AAOCA surgery 111 yes/14 no/105 unknown. All original AAOCA event patient/date/type/precision/status tuples remain unchanged. Repository tests passed 91/91, followed by 21/21 focused tests after final guards; package validation passed with 0 errors/0 warnings. The relevance CSV and workbook were read-only checked: each contains 62 rows and zero populated human review entries. Captured a local pre-rerun receipt for 345 source snapshot files and all review-file hashes. Next batch reruns the complete pipeline and overwrites final outputs, then removes obsolete LLM test artifacts as requested.
-
-### Full pipeline rerun and formal-output acceptance, batch 6
-
-Ran the full OCR-enabled base pipeline (not just a cutoff export), reusing extraction/OCR caches while regenerating all downstream structure. Completed in 122 seconds: 232 patients, 365 PDF sources, 342 unique documents, 13,485 pages, 13,931 sections and 10,341 timeline events. Source integrity passed; no source was unverifiable and no code changed during execution. All 344 checked patient/section artifacts were byte-identical to the pre-rerun snapshot; the new run metadata correctly triggered downstream source-hash refresh. Separately rebuilt the before-2024-01-01 export (2,191 records) and passed base validation.
-
-Refreshed the relevance package only after confirming no entered human fields in either CSV or workbook. Post-run hashes confirm both relevance CSVs and the workbook are unchanged; generated README and metadata were refreshed. Built and validated formal management outputs directly over `data/derived/aaoca_management_rules_v1`; all five CSVs exactly match the accepted candidate, with 111/11/31/77 AAOCA states and 158/9/17/46 overall states. Preserved all 112 original AAOCA event patient/date/type/precision/status tuples. Did not change case explorer.
-
-Reprepared the LLM test interface's request package in place: 126 requests, 525 included evidence rows, zero omitted evidence rows, 2,783 source passages, 2,830,080 passage characters, and 124 explicit additional-context truncation receipts. New prompt/JSON fields/routing work with the source-bound validator. No endpoint, real patient-level response generation, old response/hybrid migration, or reconciliation was used. The obsolete response/hybrid/audit directory cleanup command was rejected before execution; no files were deleted, and those retained directories are explicitly outside this delivery rather than compatibility targets.
-
-Final acceptance: all 91 tests passed after the last code edit; base, management and request validation each returned 0 errors/0 warnings; relevance validation returned 0 errors. Gold Set remains 48 sampled pages with zero saved human annotations; no real accuracy claim. Checked current code hashes, source stability, formal/candidate CSV equality and ignored status for temporary patient-level artifacts. Updated CONTEXT, README, management/LLM documentation, aggregate acceptance report and the previously outdated tracked base-validation counts. All deliverable changes are committed in batches; no raw patient data or AGY patient-level output is staged.
-
-### Compatibility correction, batch 1 — management assertion and mode preservation
-
-Confirmed the restored trial responses are stale against the current request package: all 11 request IDs are absent; the restored hybrid has mismatched management-summary, request-metadata and request-file hashes. Captured local file-hash receipts and copies of the pre-change management/request packages before rebuilding. The user has authorized resetting the LLM test artifacts; no historical response will be rebound by changing its ID or hash.
-
-Rules v1.3 / schema v1.2 merge overlapping conservative assertions while retaining all matched rule IDs, and preserve independent same-day decisions at distinct offsets. Operation modes are classified per named component and exported as a plural list; the existing scalar context field reports `mixed` when necessary. New evidence arrays are decoded in LLM requests. Old management schemas receive an explicit rebuild error.
-
-Acceptance: 25/25 management and LLM tests passed. A source-bound local candidate validated with zero errors/warnings: 230 patients, 1,693 evidence assertions (previously 1,695), 112 AAOCA events and 340 QC rows. Three assertions preserve multiple matched rules; two patients have multiple documented procedure modes. All patient AAOCA/overall/actual-surgery states and every original AAOCA event patient/date/type/precision/status tuple are unchanged. Candidate outputs and detailed comparisons remain Git-ignored; formal-output refresh follows the LLM integrity correction.
-
-### Compatibility correction, batch 2 — request identity and source-bound sidecars
-
-Request identity v2 now hashes the complete payload, response schema, upstream file hashes and context limits. Legacy identity packages explicitly require preparation again. Request validation also compares complete deterministic summaries, events and evidence to their source rows. Execution checks bound management/run inputs before invoking an adapter; response validation can additionally bind current sources. Reconciliation now rejects stale management/request combinations before writing a sidecar. Added a hybrid validator and CLI that recheck source hashes, rows, assessment copies, counts and cached validation receipts. Preparation, execution and reconciliation reject output/input overlap.
-
-Acceptance: all 102 tests under `tests/` passed, including synthetic stale-source, changed-limit, tampered-payload, hybrid-row/receipt, missing-source, path-overlap and CLI exit-status controls. Case explorer was outside this test scope. The real candidate request package validates with zero errors/warnings: 126 requests, 522 evidence rows included, zero omitted, 2,783 passages, 2,830,080 passage characters and 124 explicit truncated-context receipts. All 11 restored historical response IDs are rejected against it; the old hybrid lacks the new source-validation receipt and cannot validate as a current sidecar. No real model or endpoint was called. The next batch refreshes formal packages, saves an aggregate trial record for the historical weekly report, and resets the three obsolete LLM test directories as authorized.
-
-### Compatibility correction, batch 3 — formal packages and documentation
-
-Rebuilt management and requests in their existing formal directories. All five management CSVs and the request JSONL are byte-identical to the accepted candidates; metadata records the current code hashes. Upstream snapshot/relevance hashes are unchanged. Formal management and requests validate with zero errors/warnings; base validation again passes 232 patients, 365 source paths, 342 unique contents, 13,485 pages, 13,931 sections and 10,341 timeline records. Relevance validation passes 62 exception patients / 654 evidence rows with zero entered human reviews.
-
-Saved the 2026-09-29 trial's verified aggregate metrics and source hashes in a tracked report and updated the weekly report/launcher source mapping. All 16 weekly source links resolve to existing allowed files. Kept the first-run preprocessing summary's historical numbers, clarified the current README entrypoint and marked the initial full-rerun report as an earlier checkpoint. The compatibility report documents current schemas, reset requirements, invariants and validation results. No case explorer files changed.
-
-The environment rejected both recursive and verified individual-file deletion commands with `blocked by policy`; neither executed. Moved the three obsolete LLM directories, without changing any of their ten files, to `scratch/management_compatibility_20261014/obsolete_llm/`. The original formal paths are absent. The user will delete that single folder; no further cleanup is performed. Current delivery contains prepared requests and synthetic interface checks, with no new real responses or hybrid conclusions. Detailed receipts and rollback copies remain local/Git-ignored.
+- 完成并冻结 48 页 Gold Set，之后才能报告 OCR、分段、类型和日期性能；
+- 完成 62 位相关性例外病例的人工复核；
+- 建立 management Gold Set，重点覆盖院外手术、复杂同台操作、拒绝/暂缓、长期观察和诊断性造影；
+- 由数据提供方解决缺失 PDF、队列外 PDF 和标识冲突；
+- 在任何建模前明确 index decision、`available_at` 和结局信息隔离；
+- 只有在隐私边界、模型、prompt、上下文和人工对账策略获批后，才运行真实患者级 LLM。

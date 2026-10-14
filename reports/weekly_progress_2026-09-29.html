@@ -178,7 +178,7 @@
         </div>
       </div>
       <div class="callout"><strong>本周进展：</strong>文本资料已有可回溯的结构化结果，治疗状态形成候选分组，病例核验与人工复核均有可用入口。</div>
-      <details class="sources"><summary>数字来源与口径</summary><ul><li><a href="../data/derived/v0.1_full/run_metadata.json">完整快照 run_metadata.json</a>：232、342、13,931、10,341。</li><li><a href="../SESSION_LOG.md">SESSION_LOG.md</a>：9 月 25—27 日交付与验收记录。</li></ul></details>
+      <details class="sources"><summary>数字来源与口径</summary><ul><li>本页保留 2026-09-29 周报当时的展示结果；后续规则已更新，当前口径以链接文档为准。</li><li><a href="../docs/pipeline_overview.md">基础流水线与当前快照</a>：232、342、13,931、10,341。</li><li><a href="../SESSION_LOG.md">阶段记录</a>：9 月 25—29 日交付与后续口径更新。</li></ul></details>
     </section>
 
     <section class="page" id="pipeline" aria-labelledby="pipeline-title" hidden>
@@ -196,7 +196,7 @@
         <div class="card"><p class="mini-heading">目前得到的可用结构</p><div class="stat-line"><span>患者对应关系</span><strong>231 / 232</strong></div><div class="stat-line"><span>规范化章节</span><strong>13,931</strong></div><div class="stat-line"><span>有日期依据的章节</span><strong>10,362</strong></div><div class="stat-line"><span>保留来源定位</span><strong>PDF → 页 → 章节</strong></div></div>
         <div class="card blue"><p class="mini-heading">可回查的结构化结果</p><h3>同一份资料可以回看原件</h3><p>每条结构化记录可回到原 PDF、页码和章节。原始文字、OCR 文字及标准化结果的对应关系也得到保留。</p><div class="rule"></div><div class="review-note"><span class="huge">0</span><p>完整快照中，非空文本行的章节覆盖缺口与重复覆盖均为 0。<br><strong>章节位置关系通过结构检查。</strong></p></div></div>
       </div>
-      <details class="sources"><summary>证据与口径</summary><ul><li><a href="../data/derived/v0.1_full/run_metadata.json">完整快照元数据</a>：匹配、OCR、章节、日期和覆盖计数。</li><li><a href="../reports/structure_segmentation_validation_2026-09-25.md">章节规则验证记录</a>：在 342 份文档上复核新增边界。</li><li>时间线按文书日期排列；治疗事件由证据抽取与人工复核确认。</li></ul></details>
+      <details class="sources"><summary>证据与口径</summary><ul><li><a href="../docs/pipeline_overview.md">基础流水线与当前快照</a>：匹配、OCR、章节、日期和覆盖口径。</li><li>时间线按文书日期排列；治疗事件由证据抽取与人工复核确认。</li></ul></details>
     </section>
 
     <section class="page" id="management" aria-labelledby="management-title" hidden>
@@ -210,7 +210,7 @@
       </div>
       <div class="card"><p class="mini-heading">230 位自动相关患者的 observed_management 候选分布</p><div class="stacked" role="img" aria-label="111 位已手术，11 位拟手术，20 位有明确保守证据，88 位未知"><span class="surgery"></span><span class="intended"></span><span class="conservative"></span><span class="unknown"></span></div><div class="legend"><div><strong>111</strong><span>有已完成 AAOCA 手术证据 · 48.3%</span></div><div><strong>11</strong><span>拟/建议手术 · 4.8%</span></div><div><strong>20</strong><span>有明确保守证据 · 8.7%</span></div><div><strong>88</strong><span>仍未知 · 38.3%</span></div></div></div>
       <div class="grid two" style="margin-top:16px"><div class="card soft"><h3>每个结论可回到证据</h3><p>治疗抽取共保留 1,619 条带来源位置的证据；112 次去重后的 AAOCA 手术事件对应 111 位患者。</p></div><div class="card amber"><h3>人工复核进度：0 / 62</h3><p>例外病例已进入复核工作簿。上图是规则候选状态，等待医生确认。</p></div></div>
-      <details class="sources"><summary>证据与口径</summary><ul><li><a href="../reports/aaoca_exception_scan_2026-09-26.md">AAOCA 例外审计</a>：230 自动相关、2 不确定、62 位例外。</li><li><a href="../data/derived/aaoca_management_rules_v1/run_metadata.json">治疗抽取元数据</a>：111 / 11 / 20 / 88，1,619 条证据、112 次事件。</li><li><a href="../reports/aaoca_management_rules_v1_2026-09-26.md">治疗抽取汇总</a>：状态定义与复核范围。</li></ul></details>
+      <details class="sources"><summary>证据与口径</summary><ul><li><a href="../docs/aaoca_exception_review.md">AAOCA 例外复核</a>：230 自动相关、2 不确定、62 位例外。</li><li><a href="../docs/aaoca_management.md">治疗与手术整理</a>：状态定义、证据边界与后续更新后的当前口径。</li></ul></details>
     </section>
 
     <section class="page" id="cases" aria-labelledby="cases-title" hidden>
@@ -235,7 +235,7 @@
         <div class="card rose"><div class="status blocked"><span class="icon">×</span><div><h3>LLM 响应小样本审计</h3><p>11 条试跑响应中，1 条通过校验，10 条被拦截。</p></div></div><div class="dots" aria-label="11 条响应：1 条通过，10 条拦截"><i class="ok"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i><i class="bad"></i></div><p>共记录 52 项校验错误，其中证据 ID 错用 15 次、引文区间不匹配 15 次；同一响应可有多项错误。</p></div>
       </div>
       <div class="callout"><strong>下一轮试跑重点：</strong>修复证据 ID、精确引用区间和状态一致性，并用人工标注样本评估效果。</div>
-      <details class="sources"><summary>证据与口径</summary><ul><li><a href="../reports/gold_set_sampling_2026-09-25.md">Gold Set 抽样报告</a>：48 页固定样本；<a href="../data/gold_sets/aao_pdf_pages_v1/manifest.json">manifest</a>。</li><li><a href="../reports/aaoca_management_llm_trial_2026-09-29.md">9 月 29 日试跑审计汇总</a>：11 条响应、1 条原样通过、10 条拦截。</li><li><a href="../SESSION_LOG.md">验收记录</a>：完整快照、治疗抽取与浏览器交付。</li></ul></details>
+      <details class="sources"><summary>证据与口径</summary><ul><li><a href="../docs/gold_set_evaluation.md">Gold Set 设计与评分</a>：48 页固定样本及当前未完成人工标注的边界。</li><li><a href="../docs/aaoca_management_llm.md">LLM 中间件说明</a>：9 月 29 日诊断试跑及其不可作为模型准确率的限制。</li><li><a href="../SESSION_LOG.md">阶段记录</a>：完整快照、治疗抽取与浏览器交付。</li></ul></details>
     </section>
 
     <section class="page" id="research" aria-labelledby="research-title" hidden>

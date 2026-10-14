@@ -10,9 +10,9 @@
 
 - 项目背景与临床任务边界：[CONTEXT.md](CONTEXT.md)
 
-- 基础流水线设计摘要：[reports/pipeline_v0.1_summary.md](reports/pipeline_v0.1_summary.md)
+- 文档导航：[docs/README.md](docs/README.md)
 
-- 当前基础快照计数：[reports/validation_v0.1_full.json](reports/validation_v0.1_full.json)
+- 基础流水线与当前快照：[docs/pipeline_overview.md](docs/pipeline_overview.md)
 
 ## 初始化
 
@@ -161,16 +161,16 @@ python -X utf8 -m case_explorer `
 
 ```powershell
 python -X utf8 -m unittest discover -s tests -v
-python -X utf8 scripts/validate_outputs.py data/derived/v0.1_full --report reports/validation_v0.1_full.json
+python -X utf8 scripts/validate_outputs.py data/derived/v0.1_full --report data/validation/validation_v0.1_full.json
 ```
 
-测试套件覆盖匹配冲突、文档去重、异常提取、打印日期过滤、跨页合并及时间线时序。详细开发与验收记录见 `reports/` 与 `SESSION_LOG.md`。
+测试套件覆盖匹配冲突、文档去重、异常提取、打印日期过滤、跨页合并及时间线时序。长期说明见 `docs/`，关键阶段决策见 `SESSION_LOG.md`；`reports/` 只保存周报展示材料。
 
 ## Gold Set 人工核验
 
-用 `scripts/gold_set.py` 从已完成且输入 SHA256 验证通过的运行中固定抽样，浏览原始 PDF 页并校正文字、section、type/subtype 与事件日期，冻结人工答案，再对任意完整 parser 运行评分。同一 PDF 以内容 SHA256 + 页码定位，所以重新分段后 section ID 的变化不会破坏比较。
+用 `scripts/gold_set.py` 从已完成且来源一致性检查通过的运行中固定抽样，浏览原始 PDF 页并校正文字、section、type/subtype 与事件日期，冻结人工答案，再对任意完整 parser 运行评分。样本以稳定的 PDF 内容与页码定位，所以重新分段后 section ID 的变化不会破坏比较。
 
-当前已抽取 `data/gold_sets/aao_pdf_pages_v1/` 的 48 页固定样本（原生/OCR × 病历/检验各 12 页）。支持逐页核验、版本冻结，并对解析器输出进行多维度评分与版本比较。
+当前已抽取 `data/gold_sets/aao_pdf_pages_v1/` 的 48 页固定样本（原生/OCR × 病历/检验各 12 页）。支持逐页核验、版本冻结，并对解析器输出进行多维度评分与版本比较。当前完成人工标注 0 页；在人工版本冻结前，不提供也不应声明真实解析准确率。
 
 开始核验：
 
@@ -179,7 +179,7 @@ python -X utf8 scripts/gold_set.py review --run data/derived/v0.1_full --gold-di
 python -X utf8 scripts/gold_set.py validate --gold-dir data/gold_sets/aao_pdf_pages_v1
 ```
 
-操作步骤、日期角色和不确定标记见 [人工核验指南](docs/gold_set_review.md)；抽样方法、评分定义、冻结/版本比较命令见 [评估规范](docs/gold_set_evaluation.md)。实际抽样覆盖与局限见 [抽样报告](reports/gold_set_sampling_2026-09-25.md)。
+操作步骤、日期角色和不确定标记见 [人工核验指南](docs/gold_set_review.md)；当前抽样规模、评分定义、冻结与版本比较命令见 [评估规范](docs/gold_set_evaluation.md)。
 
 ## AAOCA 相关性例外病例复核
 

@@ -33,17 +33,14 @@ SOURCE_PATHS = {
     "CONTEXT.md",
     "SESSION_LOG.md",
     "case_explorer/README.md",
+    "docs/pipeline_overview.md",
     "docs/gold_set_review.md",
-    "reports/aaoca_exception_scan_2026-09-26.md",
-    "reports/aaoca_management_rules_v1_2026-09-26.md",
-    "reports/gold_set_sampling_2026-09-25.md",
-    "reports/structure_segmentation_validation_2026-09-25.md",
-    "data/derived/v0.1_full/run_metadata.json",
-    "data/derived/aaoca_management_rules_v1/run_metadata.json",
+    "docs/gold_set_evaluation.md",
+    "docs/aaoca_exception_review.md",
+    "docs/aaoca_management.md",
+    "docs/aaoca_management_llm.md",
     "data/derived/aaoca_management_rules_v1/management_evidence.csv",
     "data/derived/aaoca_management_rules_v1/management_summary.csv",
-    "reports/aaoca_management_llm_trial_2026-09-29.md",
-    "data/gold_sets/aao_pdf_pages_v1/manifest.json",
 }
 
 
