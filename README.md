@@ -1,6 +1,6 @@
 # AAOCA text pipeline v0.1
 
-本工程将患者 CSV 与医院网页导出的 PDF 整理为可追溯的患者索引、文档分段、时间线和 QC，并在此基础上提取 AAOCA 相关性、实际管理和手术证据。基础预处理及 deterministic management 使用本地 Python、PyMuPDF、规则及可选 RapidOCR；不调用第三方处理 API，不修改原始数据。LLM middleware 是独立的离线可测试原型，接入 endpoint 前不产生真实模型结论。项目背景见 `CONTEXT.md`，预处理结果见 `reports/pipeline_v0.1_summary.md`，最新 management 验收见 [2026-10-14 报告](reports/aaoca_management_complex_context_2026-10-14.md)。
+本工程将患者 CSV 与医院网页导出的 PDF 整理为可追溯的患者索引、文档分段、时间线和 QC，并在此基础上提取 AAOCA 相关性、实际管理和手术证据。基础预处理及 deterministic management 使用本地 Python、PyMuPDF、规则及可选 RapidOCR；不调用第三方处理 API，不修改原始数据。LLM middleware 是独立的离线可测试原型，接入 endpoint 前不产生真实模型结论。项目背景见 `CONTEXT.md`，9 月 25 日首次预处理的历史摘要见 `reports/pipeline_v0.1_summary.md`，当前基础 snapshot 计数见 `reports/validation_v0.1_full.json`，最新 management/LLM 兼容验收见 [2026-10-14 修正报告](reports/aaoca_management_compatibility_2026-10-14.md)。
 
 ## 运行
 
@@ -203,3 +203,5 @@ python -X utf8 scripts/aaoca_management_llm.py validate-requests --requests data
 ```
 
 最后两步只生成/验证本地请求，不调用模型。字段与规则边界见 [management contract](docs/aaoca_management.md)，可替换的 prompt、路由、provider adapter 和 fake-client 测试见 [LLM prototype](docs/aaoca_management_llm.md)。重跑基础 snapshot 后须刷新下游 source hashes；如果 relevance 包已有人工字段，不可直接 `build` 覆盖，应先保留并核对人工结果。`--before` 只执行截点导出，不会同时重跑基础解析。
+
+当前 management schema 为 v1.2、规则为 v1.3；旧生成包须依次重建 management 与 requests。Request identity v2 绑定完整 payload、source hashes 和上下文限额；旧 response/hybrid 测试包已移出正式目录，不复用旧 ID。新 response 的对账会检查当前 management 绑定，生成的 sidecar 可用 `validate-hybrid` 检查，命令见 LLM 文档。

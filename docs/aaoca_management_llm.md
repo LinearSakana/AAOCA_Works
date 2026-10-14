@@ -185,9 +185,11 @@ python -X utf8 scripts/aaoca_management_llm.py validate-hybrid `
 
 此目录包含临床原文，只能本地保存。本轮没有生成真实 response，也没有运行 reconciliation 得到新的真实 hybrid label；本轮测试中的 response 只来自合成病例和 fake client。早期测试目录的存在不能视为当前请求已经得到响应。
 
-按本轮用户要求，LLM 分支仅作为可替换测试原型，旧 response/hybrid 可以覆盖或删除，不迁移。初次重跑时清理命令被执行环境拒绝，用户随后手动删除又还原了三个旧实验目录。兼容检查确认全部 11 个历史 response ID 与当前请求不匹配，旧 hybrid 的 management-summary/request-metadata/requests 三项 hashes 不匹配；它们不能用于当前结果。完成新包验证后重置旧实验目录。
+按本轮用户要求，LLM 分支仅作为可替换测试原型，旧 response/hybrid 可以覆盖或删除，不迁移。初次重跑时清理命令被执行环境拒绝，用户随后手动删除又还原了三个旧实验目录。兼容检查确认全部 11 个历史 response ID 与当前请求不匹配，旧 hybrid 的 management-summary/request-metadata/requests 三项 hashes 不匹配；它们不能用于当前结果。完成新包验证后，三个旧实验目录已移至 `scratch/management_compatibility_20261014/obsolete_llm/`，正式路径已清空；删除仍被环境策略阻止，用户自行删除该文件夹即可。必要汇总保存为 [9 月试跑历史报告](../reports/aaoca_management_llm_trial_2026-09-29.md)。
 
 2026-10-14 首次完整重跑（v1.2）曾生成 126 个请求（7 surgery / 11 intended / 31 conservative / 77 unknown），纳入 525 条 evidence、2,783 个 passages、2,830,080 字符，124 个请求报告额外 section 上下文截断。这是去重修正前的历史收据；当前请求以 v2 identity 重建。证据行是否遗漏与额外原文上下文是否截断是不同维度。
+
+本次正式重建为 126 个请求、522 条纳入 evidence、0 条省略、2,783 个 passages、2,830,080 字符及 124 个上下文截断收据；source-bound validation 为 0 errors / 0 warnings。当前没有真实 response 或 hybrid 目录。完整验收见 [兼容修正报告](../reports/aaoca_management_compatibility_2026-10-14.md)。
 
 ## 6. 仍需用户决定的内容
 

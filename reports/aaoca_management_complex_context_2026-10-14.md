@@ -1,5 +1,7 @@
 # AAOCA management v1.2: complex-procedure context and full-rerun acceptance
 
+This report records the first full-rerun checkpoint. The subsequent v1.3 rules, current output counts, request identity v2 and completed test-artifact reset are documented in [the compatibility acceptance report](aaoca_management_compatibility_2026-10-14.md).
+
 ## Scope
 
 This batch extends the correction audit from 2026-10-13. The four AAOCA management states retain their meaning. Additive research fields describe actual competing procedures, coronary handling within each procedure, and reasons to prioritize complex cases. They are not treatment recommendations, severity scores, or causal comorbidity labels.
@@ -70,6 +72,6 @@ Directly overwrote the local LLM request package using prompt v1.1. Default ambi
 
 Acceptance: 91/91 tests; base, management and request validators each report 0 errors/0 warnings; relevance validation reports 0 errors. Existing Gold Set validation confirms 48 sampled pages and zero saved human annotations, so no clinical extraction accuracy is claimed. Source hashes, current extraction code hashes, final/candidate CSV equality, and review-file preservation were additionally checked. Case explorer was not modified.
 
-The requested cleanup of the three obsolete LLM experiment directories (`aaoca_management_llm_responses_v1`, `aaoca_management_hybrid_trial_v1`, `aaoca_management_llm_audit_v1`) was rejected by the execution environment before running. No files were deleted. These directories remain on disk but are not current outputs and must not be mixed with the rebuilt request package; their retention is not a compatibility requirement. Temporary scripts, patient-level audit receipts and AGY deliveries are confirmed Git-ignored.
+At this checkpoint, cleanup of the three obsolete LLM experiment directories (`aaoca_management_llm_responses_v1`, `aaoca_management_hybrid_trial_v1`, `aaoca_management_llm_audit_v1`) was rejected by the execution environment before running; no files were deleted. The directories then remained outside the delivery and were not compatibility targets. Following the user's manual deletion/restoration and authorization to reset test outputs, deletion was again blocked by policy. The later compatibility batch moved the directories to `scratch/management_compatibility_20261014/obsolete_llm/` after preserving an aggregate historical trial report; the user will delete that folder. Temporary scripts, patient-level audit receipts and AGY deliveries remain Git-ignored.
 
 Reproduction order: full base run (without `--before`), separate cutoff export, base validation, relevance refresh with human-field preservation checks, management build/validate, then LLM prepare/validate-requests. Commands and contracts are linked from the root README. The source-bound validators reject stale upstream/downstream combinations.

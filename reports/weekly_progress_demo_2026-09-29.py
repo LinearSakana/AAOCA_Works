@@ -42,7 +42,7 @@ SOURCE_PATHS = {
     "data/derived/aaoca_management_rules_v1/run_metadata.json",
     "data/derived/aaoca_management_rules_v1/management_evidence.csv",
     "data/derived/aaoca_management_rules_v1/management_summary.csv",
-    "data/derived/aaoca_management_llm_audit_v1/evaluation.md",
+    "reports/aaoca_management_llm_trial_2026-09-29.md",
     "data/gold_sets/aao_pdf_pages_v1/manifest.json",
 }
 
