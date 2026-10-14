@@ -10,37 +10,64 @@
 
 ## 2. 为什么只复核例外
 
-医院已经筛查过该队列。对 `data/derived/v0.1_full` 的实际逐患者扫描显示，绝大多数患者在诊断、具体冠脉来源、CTA/造影、会诊或手术记录中都有多处明确证据。让人工重复审阅全部患者既增加工作量，也会稀释真正需要判断的病例。
+医院已经筛查过该队列。逐患者扫描显示，绝大多数患者在诊断、冠脉来源、CTA/造影、会诊或手术记录中都有多处明确证据。让人工重复审阅全部患者会增加工作量，也会稀释真正需要判断的病例。
 
-规则因此采用以下流程：
+当前流程先在患者层聚合带来源定位的证据，然后只把资料不足、证据稀疏、始终为疑似、解剖描述冲突或研究范围边界不清的患者送入人工队列。普通高证据病例不会出现在工作簿中。
 
-1. 从 section JSON 中抽取带 `document_id`、`section_id`、页码、原文路径和 JSON pointer 的证据；
-2. 在患者层聚合，而不是按单个关键词直接分类；
-3. 普通高证据病例不进入人工交付物；
-4. 只输出资料不足、证据稀疏、始终为疑似、解剖描述冲突或范围边界不清的患者。
+## 3. 当前进度
 
-## 3. 当前例外条件
+基于当前 232 位患者的正式快照：
 
-| reason code | 需要人工确认的情况 |
+| 项目 | 数量 |
+|---|---:|
+| 自动判为相关 | 230 |
+| 自动判为不相关 | 0 |
+| 自动无法判断 | 2 |
+| 进入例外人工队列 | 62 |
+| 未进入人工交付物的普通病例 | 170 |
+| 例外证据行 | 654 |
+| 已完成人工复核 | 0 |
+
+62 位例外病例包含 60 位暂列自动 `yes` 和 2 位自动 `uncertain`；其余 170 位是没有进入人工交付物的普通高证据病例。因此，当前下游 Management 纳入的 230 位患者由 170 位普通病例和 60 位尚待人工复核的例外病例组成，排除的正是 2 位 `uncertain`。如果后续人工复核推翻部分自动判断，Management 分母与汇总结果需要随之重建。
+
+两个自动无法判断病例分别是：一位在当前范围内没有 PDF；另一位只有空病历 PDF 和检验包中的非临床诊断页头，缺少能说明诊疗过程的临床文书。当前 230 个 `yes` 是证据分流结果，不是临床金标准。
+
+## 4. 哪些情况进入例外队列
+
+| 类型 | 需要人工确认的情况 |
 |---|---|
-| `missing_source_documentation` | 患者在当前输入范围内没有 PDF 或没有 section。 |
-| `evidence_only_in_nonclinical_or_laboratory_content` | 相关表述只存在于网页页眉、导航或检验包，缺少临床文书语境。 |
-| `single_evidence_section` | 只有一个弱、疑似或非临床证据 section。 |
-| `tentative_evidence_only` | 所有正向证据均为“可能、待排、不能除外、显示不清”等状态。注意：若这确实触发了诊疗尝试，最终标签仍应为 `yes`。 |
-| `conflicting_coronary_origin_descriptions` | 同一冠脉在不同证据中出现不一致的来源；可能是真实前后变化、术后状态、转录/OCR 错误或文书冲突。 |
-| `normal_and_abnormal_origin_same_vessel` | 同一冠脉既有明确异常描述，也有明确正常描述。 |
-| `pulmonary_origin_scope_boundary` | 出现 ALCAPA、ARCAPA 或冠脉起源于肺动脉；它与严格 AAOCA 定义不同，但可能作为鉴别诊断或相关冠脉异常进入诊疗。 |
-| `single_coronary_or_complex_chd_scope_boundary` | 单支冠脉、冠脉起自另一冠脉，或复杂先心病手术中的冠脉解剖，需要确认是否属于本项目的“相应冠状动脉异常”范围。 |
-| `high_origin_without_more_specific_anatomy` | 只有冠脉高位起源/高位开口，缺少更具体的异常解剖。 |
-| `normal_origin_and_nonspecific_positive_label` | 正常来源描述与笼统“冠脉异常”标签并存，但没有可解析的具体异常来源。 |
-| `sparse_nonspecific_label` | 只有少量笼统诊断名称，没有解剖、针对性检查或处置证据。 |
-| `sparse_ocr_only_evidence` | 少量证据全部来自未经人工核验的 OCR。 |
-| `no_meaningful_aaoca_evidence_in_adequate_record` | 临床文书覆盖较充分，但没有发现 AAOCA 进入诊疗过程的证据。 |
-| `insufficient_evidence_for_reliable_judgment` | 资料不足且不满足更具体原因。 |
+| 来源不足 | 没有 PDF、没有可用 section，或相关表述只存在于网页页眉/检验包。 |
+| 证据过少 | 只有一个弱、疑似、非临床或未经核验的 OCR 证据。 |
+| 始终疑似 | 所有证据都是“可能、待排、不能除外、显示不清”等状态。若它确实触发了检查或讨论，最终仍可能是 `yes`。 |
+| 解剖冲突 | 同一冠脉在不同文书中出现不一致来源，或同时有明确正常与异常描述。 |
+| 范围边界 | 肺动脉来源、单支冠脉、冠脉起自另一冠脉、复杂先心病中的冠脉解剖、高位开口等是否属于本项目范围。 |
+| 标签过于笼统 | 只有“冠脉异常”等名称，没有可解析的解剖、针对性检查或处置。 |
+| 充分资料中无实质证据 | 临床文书覆盖较完整，但没有发现 AAOCA 真正进入诊疗过程。 |
 
-规则不会因为“后来排除”而自动给 `no`。`explicit_exclusion` 本身说明该方向曾被实际考虑。
+规则不会因为“后来排除”而自动给 `no`。明确排除本身通常说明该方向曾被实际考虑。
 
-## 4. 运行和文件
+## 5. 人工复核文件
+
+本地目录 `data/review/aaoca_exception_review_v1/` 包含：
+
+- `exception_cases.csv`：每位例外患者一行，包含自动判断、例外原因、证据摘要和人工字段；
+- `exception_evidence.csv`：每位例外患者少量且语义不同的证据；
+- `AAOCA_exception_review.xlsx`：面向人工的工作簿，黄色列为可编辑区；
+- `README.md`：随本地工作包生成的简要说明。
+
+工作簿只包含 62 位例外患者，不包含其余 170 位普通病例。直接标识只存在于受限的本地 review 目录，不能提交或外传。
+
+人工只填写三列：
+
+- `review_status`：`not_reviewed`、`in_review` 或 `reviewed`；
+- `final_aaoca_judgment`：`yes`、`no` 或 `uncertain`；
+- `reviewer_notes`：支持结论的简短说明。
+
+如果填写了最终标签，状态必须是 `reviewed`。不要改动自动判断、原因、证据和定位列。
+
+## 6. 运行方式
+
+生成并检查例外包：
 
 ```powershell
 python -X utf8 scripts/aaoca_exception_review.py build `
@@ -51,53 +78,21 @@ python -X utf8 scripts/aaoca_exception_review.py validate `
   --output data/review/aaoca_exception_review_v1
 ```
 
-人工交付物只含例外病例：
-
-- `exception_cases.csv`：一位例外患者一行，保留自动判断、原因、证据摘要和人工字段；
-- `exception_evidence.csv`：只保留例外患者的少量、语义不同的证据行；
-- `AAOCA_exception_review.xlsx`：面向人工的工作簿，包含“例外病例”“证据”“说明”三个工作表；病例表黄色三列为人工编辑区；
-- `run_metadata.json`：规则版本、源 snapshot 表的 SHA256、聚合计数和人工字段约束；
-- `README.md`：本地复核简要说明。
-
-工作簿从上述 CSV 和 metadata 生成；它会再次核对 `human_deliverable_scope=exception_patients_only`、病例数和证据行数，不会把普通患者写入病例或证据工作表。在提供 `@oai/artifact-tool` 的维护环境中，可重建工作簿：
-
-```powershell
-node scripts/build_aaoca_exception_workbook.mjs `
-  --input data/review/aaoca_exception_review_v1 `
-  --output data/review/aaoca_exception_review_v1/AAOCA_exception_review.xlsx
-```
-
-人工只编辑以下列：
-
-- `review_status`: `not_reviewed` / `in_review` / `reviewed`；
-- `final_aaoca_judgment`: `yes` / `no` / `uncertain`；
-- `reviewer_notes`。
-
-如果直接编辑 CSV，可跳过导入步骤。如果在工作簿中编辑，保存后先把黄色三列回写到既有 CSV contract：
+若在工作簿中完成复核，先把三个人工字段回写到 CSV，再要求全部完成：
 
 ```powershell
 python -X utf8 scripts/aaoca_exception_review.py import-workbook `
   --output data/review/aaoca_exception_review_v1
-```
 
-导入会要求工作簿与 CSV 的患者 ID 集合完全相同，并且只复制 `review_status`、`final_aaoca_judgment` 和 `reviewer_notes`；自动判断、例外原因、证据及定位列不会从 Excel 回写。填写最终标签后，`review_status` 必须为 `reviewed`。需要在后续流程使用最终标签前，运行：
-
-```powershell
 python -X utf8 scripts/aaoca_exception_review.py validate `
   --output data/review/aaoca_exception_review_v1 `
   --require-complete
 ```
 
-## 5. 数据兼容和扩展
+导入会要求工作簿与 CSV 的患者集合完全一致，并且只复制三个人工列。自动阶段和证据表不会被 Excel 覆盖。
 
-- 此阶段只读现有 pipeline snapshot，不修改 `patient_manifest.csv`、`section_index.csv`、section JSON 或时间线。
-- 输入必须有 `status=complete` 且 source hash verification 已通过。
-- 同时兼容旧 section type `surgery_related` 和当前 `procedure`。
-- 输出字段顺序由代码常量固定；`ruleset_version=aaoca_exception_rules_v1`，每次输出记录源 `run_metadata.json`、`patient_manifest.csv` 和 `section_index.csv` 的 SHA256。
-- CSV 仍是下游稳定接口；工作簿是可编辑的人工作业视图。`import-workbook` 只更新已有的三个人工列，因此不会改变自动阶段 schema 或证据表粒度。
-- 直接标识符仅从 snapshot 的 `private/patient_linkage.csv` 复制到受限的本地 review 目录，便于人工定位；这些文件不能提交或外传。
-- `AaocaEvidenceExtractor` 是明确的 middleware contract。未来经单独授权的本地 LLM 可以输出同一证据结构；患者层聚合、例外队列、人工字段和验证约束无需改写。当前版本完全使用 deterministic rules，不调用 LLM 或外部病例处理服务。
+## 7. 解释边界
 
-## 6. 质量边界
+自动结果只用于复核分流。规则能证明某些可追溯文字被识别并按一致逻辑聚合，不能证明 OCR、文书归属或冠脉解剖一定正确。对解剖冲突、肺动脉来源、复杂先心病和仅 OCR 证据，应回看证据指向的 section，必要时打开原 PDF 页面。
 
-自动结果是复核分流，不是临床金标准。规则可以证明某些可追溯文本被识别并按一致逻辑聚合，不能证明 OCR、文书归属或临床解剖一定正确。对冲突、肺动脉来源、复杂先心病和仅 OCR 证据，必须回看 `exception_evidence.csv` 指向的 section，必要时打开原 PDF 页面。工作簿为了符合 Excel/OpenXML 限制，只在展示层把 OCR 文本中 XML 禁止的控制码替换为空格；源 CSV、section JSON 和原始定位保持不变。
+完成复核后，下游治疗状态需要按 [AAOCA 实际治疗与手术整理](aaoca_management.md) 重新构建。返回 [项目文档导航](README.md)。
