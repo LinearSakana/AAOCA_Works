@@ -1,6 +1,7 @@
 # All source and derived patient data stay local. Reports must use aggregate IDs.
 data/
 scratch/
+/reports/
 models/
 logs/
 __pycache__/
