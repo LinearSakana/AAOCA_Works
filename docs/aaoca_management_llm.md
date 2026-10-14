@@ -169,9 +169,11 @@ python -X utf8 scripts/aaoca_management_llm.py reconcile `
 
 122/124 个请求的 `context_truncated=true`，原因主要是患者可用 section 多于默认 24 个；这不表示已有 436 条 management evidence 被删除。每个请求仍保留实际 included/omitted receipt。最小/中位/最大 passage 字符量约为 7,422 / 21,820 / 39,750，均低于 80,000 的 patient 上限。
 
-此目录包含临床原文，只能本地保存。当前没有 response 文件，也没有运行 reconciliation 得到真实 hybrid label；测试中的 response 只来自合成病例和 fake client。
+此目录包含临床原文，只能本地保存。本轮没有生成真实 response，也没有运行 reconciliation 得到新的真实 hybrid label；本轮测试中的 response 只来自合成病例和 fake client。早期测试目录的存在不能视为当前请求已经得到响应。
 
-按本轮用户要求，LLM 分支仅作为可替换测试原型，旧 response/hybrid 不做迁移或兼容保留。更新 deterministic 后重新 prepare，所有请求绑定新 source hashes；旧实验输出清除。真实模型尚未接入时只交付新请求包和 fake-client 测试通过的接口，不制造新模型结论。
+按本轮用户要求，LLM 分支仅作为可替换测试原型，旧 response/hybrid 不做迁移或兼容处理。更新 deterministic 后重新 prepare，所有请求绑定新 source hashes；真实模型尚未接入时只交付新请求包和 fake-client 测试通过的接口，不制造新模型结论。2026-10-14 清理旧 `aaoca_management_llm_responses_v1`、`aaoca_management_hybrid_trial_v1`、`aaoca_management_llm_audit_v1` 目录的命令被执行环境拒绝，因此它们仍可能存在，但不属于本次输出，不得与重建的请求混用。
+
+本轮正式重建结果：126 个请求（7 surgery / 11 intended / 31 conservative / 77 unknown），525 条 management evidence 全部纳入，2,783 个原文 passages、2,830,080 字符。124 个请求的额外 section 上下文因默认限额而截断，receipt 保留具体 omitted 信息；这与 evidence rows 无遗漏是两个不同维度。新字段已正确解码为 JSON 对象/数组，高优先级复杂病例纳入默认 ambiguous 路由。请求与原文验证为 0 errors / 0 warnings；端到端 fake-client 测试通过，没有 endpoint 调用。
 
 ## 6. 仍需用户决定的内容
 

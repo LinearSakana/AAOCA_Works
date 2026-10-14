@@ -155,3 +155,11 @@ Raw PDF
 > 数据质量如何？
 > 哪些字段可以可靠获得？
 > 哪些病例可以支持哪些研究任务？
+
+## 7. 阶段更新（2026-10-14）
+
+上述基础预处理已实现并以本地 RapidOCR 补足异常页；当前工作转向 AAOCA 实际 management 抽取。只纳入 relevance contract 解析为 `yes` 的患者，保留 `surgery/intended_surgery/conservative/unknown`，不能把建议或拟行手术当成已完成，也不能把记录缺失当成保守治疗。
+
+研究需要区分“患者确实接受了其他治疗”和“AAOCA 实际如何处理”：前者由总体治疗状态、其他操作方式/类别记录，后者独立保留 management、AAOCA surgery 和逐操作冠脉处理证据。共病/复杂操作的复核优先级只用于研究抽查，不表示医疗风险或因果结论。详细边界在 `docs/aaoca_management.md`。
+
+规则分支可独立交付；LLM middleware 为另一个可测试的 provider-neutral 原型。模型、prompt、上下文限额和路由可替换；没有 endpoint 时只准备请求并使用合成 fake client 测试，不生成真实患者的 LLM/hybrid 结论。临床文本、临时抽查材料及 AGY 原始回复均留在 Git-ignored 本地目录；仓库只提交代码、合成测试和不含患者原文的汇总报告。

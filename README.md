@@ -1,6 +1,6 @@
 # AAOCA text pipeline v0.1
 
-本工程将患者 CSV 与医院网页导出的 PDF 整理为可追溯的患者索引、文档分段、时间线和 QC。使用本地 Python、PyMuPDF、规则及可选 RapidOCR；**不调用第三方处理 API，不使用 LLM，不修改原始数据。** 项目背景见 `CONTEXT.md`，本次真实结果见 `reports/pipeline_v0.1_summary.md`。
+本工程将患者 CSV 与医院网页导出的 PDF 整理为可追溯的患者索引、文档分段、时间线和 QC，并在此基础上提取 AAOCA 相关性、实际管理和手术证据。基础预处理及 deterministic management 使用本地 Python、PyMuPDF、规则及可选 RapidOCR；不调用第三方处理 API，不修改原始数据。LLM middleware 是独立的离线可测试原型，接入 endpoint 前不产生真实模型结论。项目背景见 `CONTEXT.md`，预处理结果见 `reports/pipeline_v0.1_summary.md`，最新 management 验收见 [2026-10-14 报告](reports/aaoca_management_complex_context_2026-10-14.md)。
 
 ## 运行
 
@@ -188,3 +188,18 @@ python -X utf8 scripts/aaoca_exception_review.py validate `
   --output data/review/aaoca_exception_review_v1 `
   --require-complete
 ```
+
+## AAOCA 实际管理、其他治疗及复杂病例
+
+规则结果区分 AAOCA-specific 的 `observed_management`（`surgery/intended_surgery/conservative/unknown`）、患者整体已接受治疗的 `overall_treatment_status`，以及独立的 `actual_aaoca_surgery`。因此 VSD/PFO 修补、瓣膜介入等其他治疗可以明确记录为已发生，同时保留 AAOCA 去向不明。新增操作类别、术中冠脉处理及证据关联、研究复核优先级，便于筛选共病/复杂处置病例。
+
+在完成基础运行并确认 relevance package 绑定同一 snapshot 后执行：
+
+```powershell
+python -X utf8 scripts/aaoca_management.py build --run data/derived/v0.1_full --aaoca-review data/review/aaoca_exception_review_v1 --output data/derived/aaoca_management_rules_v1
+python -X utf8 scripts/aaoca_management.py validate --run data/derived/v0.1_full --aaoca-review data/review/aaoca_exception_review_v1 --output data/derived/aaoca_management_rules_v1
+python -X utf8 scripts/aaoca_management_llm.py prepare --management data/derived/aaoca_management_rules_v1 --run data/derived/v0.1_full --aaoca-review data/review/aaoca_exception_review_v1 --output data/derived/aaoca_management_llm_requests_v1
+python -X utf8 scripts/aaoca_management_llm.py validate-requests --requests data/derived/aaoca_management_llm_requests_v1 --management data/derived/aaoca_management_rules_v1 --run data/derived/v0.1_full
+```
+
+最后两步只生成/验证本地请求，不调用模型。字段与规则边界见 [management contract](docs/aaoca_management.md)，可替换的 prompt、路由、provider adapter 和 fake-client 测试见 [LLM prototype](docs/aaoca_management_llm.md)。重跑基础 snapshot 后须刷新下游 source hashes；如果 relevance 包已有人工字段，不可直接 `build` 覆盖，应先保留并核对人工结果。`--before` 只执行截点导出，不会同时重跑基础解析。

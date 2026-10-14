@@ -46,3 +46,30 @@ Rejected recommendations included forcing every conservative case to `actual_aao
 Acceptance candidate: 230 patients, 1,695 evidence rows, 112 AAOCA events, 340 QC rows. AAOCA status is 111 surgery / 11 intended / 31 conservative / 77 unknown; overall treatment is 158 / 9 / 17 / 46; actual AAOCA surgery is 111 yes / 14 no / 105 unknown. Other cardiac therapy is documented in 85 patients. Research priority is 32 high / 86 medium / 112 routine.
 
 Compared with the original v1 output, 8 unknown cases become conservative, 3 become intended surgery, and 3 prior intended cases become conservative after a documented later decision. All 112 AAOCA event patient/date/type/precision/status tuples are unchanged. All 91 repository tests passed; the final focused suite passed 21/21 and source-bound candidate validation returned 0 errors/0 warnings. Full formal-output rerun follows this checkpoint.
+
+## Full pipeline rerun and formal delivery
+
+Completed the full local pipeline on 2026-10-14, using `config/pipeline.ocr.json` with the existing source roots. The run took 122 seconds and reused 342 native-extraction caches and 199 OCR document caches; it still regenerated normalization, sections, dates, indices, timelines and QC. Input SHA256 verification passed with zero unverifiable sources. Counts remain 232 patients, 365 source PDFs, 342 unique documents, 13,485 pages, 13,931 sections and 10,341 timeline records. No code changed during the run.
+
+Compared pre/post hashes for the patient manifest, section index and all 342 section JSON files: all were byte-identical. Only the run metadata changed among those 345 checked files. Re-exported the strictly-before-2024-01-01 cutoff: 2,191 records; it still does not claim leakage freedom. Refreshed the tracked base validation report, whose previously committed counts predated the current section parser.
+
+Rebuilt and validated the relevance package against the new run metadata. `exception_cases.csv`, `exception_evidence.csv`, and the existing workbook retained their exact pre-rerun hashes; only package metadata and generated README changed. Both CSV and workbook still have zero entered human reviews. Thus the 230 included patients continue to follow the existing automatic relevance contract, not a newly invented clinician adjudication.
+
+Directly overwrote `data/derived/aaoca_management_rules_v1`. Its five CSV outputs are byte-identical to the accepted candidate. Final distributions are:
+
+| State | AAOCA management | Overall therapeutic-procedure status |
+|---|---:|---:|
+| surgery | 111 | 158 |
+| intended_surgery | 11 | 9 |
+| conservative | 31 | 17 |
+| unknown | 77 | 46 |
+
+`actual_aaoca_surgery` remains independently defined: 111 yes / 14 no / 105 unknown. The package has 1,695 traceable assertions, 112 deduplicated AAOCA surgery events and 340 review-queue rows. There are 85 patients with another cardiac therapeutic procedure; research-review priority is 32 high / 86 medium / 112 routine. These groups overlap and are not mutually exclusive clinical treatment arms.
+
+Directly overwrote the local LLM request package using prompt v1.1. Default ambiguous selection contains 126 requests (7 surgery, 11 intended, 31 conservative, 77 unknown), all 525 available management evidence rows for selected patients, 2,783 exact source passages and 2,830,080 passage characters. No management evidence rows were omitted. 124 requests explicitly report truncated additional section context under the configurable limits; no claim of complete full-chart model input is made. Preparation and source validation passed without a model call. Old response/hybrid artifacts were neither read for inference nor migrated, and no new real patient-level model or hybrid conclusions were produced.
+
+Acceptance: 91/91 tests; base, management and request validators each report 0 errors/0 warnings; relevance validation reports 0 errors. Existing Gold Set validation confirms 48 sampled pages and zero saved human annotations, so no clinical extraction accuracy is claimed. Source hashes, current extraction code hashes, final/candidate CSV equality, and review-file preservation were additionally checked. Case explorer was not modified.
+
+The requested cleanup of the three obsolete LLM experiment directories (`aaoca_management_llm_responses_v1`, `aaoca_management_hybrid_trial_v1`, `aaoca_management_llm_audit_v1`) was rejected by the execution environment before running. No files were deleted. These directories remain on disk but are not current outputs and must not be mixed with the rebuilt request package; their retention is not a compatibility requirement. Temporary scripts, patient-level audit receipts and AGY deliveries are confirmed Git-ignored.
+
+Reproduction order: full base run (without `--before`), separate cutoff export, base validation, relevance refresh with human-field preservation checks, management build/validate, then LLM prepare/validate-requests. Commands and contracts are linked from the root README. The source-bound validators reject stale upstream/downstream combinations.
