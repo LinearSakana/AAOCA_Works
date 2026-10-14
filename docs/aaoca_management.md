@@ -1,4 +1,4 @@
-# AAOCA 实际治疗与手术整理（deterministic v1.2）
+# AAOCA 实际治疗与手术整理（deterministic v1.3）
 
 ## 1. 任务边界
 
@@ -89,7 +89,7 @@ python -X utf8 scripts/aaoca_management.py validate `
 - `unrelated_completed`：真实完成的其他手术，但 AAOCA 关系未建立，明确不计 AAOCA 手术。
 - `context_only`：复杂矫治中的冠脉操作、等待进一步讨论等背景事实；本身不改变 AAOCA management，也不能建立 AAOCA surgery。
 
-`char_start/char_end` 是带上下文的 evidence excerpt 在 section 正文中的 0-based、右端不含区间；`assertion_char_start/assertion_char_end` 是触发断言本身的精确位置。验证器会重新打开 section JSON，核对 excerpt 原文以及 assertion span 必须落在 excerpt 内。`source_pdf`、页码、`text_path` 和 `text_reference` 提供回到原始病例的路径。
+`char_start/char_end` 是带上下文的 evidence excerpt 在 section 正文中的 0-based、右端不含区间；`assertion_char_start/assertion_char_end` 是触发断言本身的位置。重叠的非手术规则合并为一条证据，`rule_id` 保留代表规则，`matched_rule_ids` 记录全部命中规则；同日但不重叠的决定保留独立位置。验证器会重新打开 section JSON，核对 excerpt 原文以及 assertion span 必须落在 excerpt 内。`source_pdf`、页码、`text_path` 和 `text_reference` 提供回到原始病例的路径。
 
 ### `surgery_events.csv`
 
@@ -106,7 +106,7 @@ python -X utf8 scripts/aaoca_management.py validate `
 
 ### 共病和复杂处置的研究字段（v1.2 新增）
 
-这些是记录支持的研究筛选层，不表示共病导致某种处置的因果关系，也不是手术指征或疾病严重度评分。旧列保留；schema 升为 `aaoca_management_v1.1`，ruleset 为 `aaoca_management_rules_v1.2`。
+这些是记录支持的研究筛选层，不表示共病导致某种处置的因果关系，也不是手术指征或疾病严重度评分。当前 schema 为 `aaoca_management_v1.2`，ruleset 为 `aaoca_management_rules_v1.3`。旧 CSV 列保留，新增 `matched_rule_ids` 及操作上下文内的 `procedure_modes`；旧 schema 的生成包须从 source 重建，验证器会明确返回版本不匹配。
 
 | 字段 | 语义与允许值 |
 |---|---|
@@ -114,7 +114,7 @@ python -X utf8 scripts/aaoca_management.py validate `
 | `other_procedure_modes` | JSON 多选：`cardiac_surgery`、`cardiac_catheter_intervention`、`noncardiac_surgery`、`unclassified_operation`。 |
 | `other_procedure_categories` | 依据实际术名细分为间隔缺损修补、瓣膜操作、流出道/肺动脉操作、PDA/主动脉弓操作、肺静脉纠治、复杂先心矫治、其他血管/冠脉操作、血管支架、电生理、心包及非心脏操作等；可能多选。 |
 | `aaoca_handling_during_other_procedure` | `concomitant_aaoca_repair`、`explicitly_not_treated`、`assessed_no_intervention`、`anatomy_documented_intervention_unclear`、`coronary_manipulated_target_unclear`、`not_documented`、`conflicting_documentation`、`multiple_contexts`、`not_applicable`。 |
-| `other_procedure_contexts` | JSON 对象列表；每项保留 `procedure_evidence_id`、该证据所载操作日期、操作方式/类别、AAOCA 处理状态及 `handling_evidence_ids`。这是证据层列表，不能以列表长度当作手术次数。 |
+| `other_procedure_contexts` | JSON 对象列表；每项保留 `procedure_evidence_id`、操作日期、`procedure_modes` 多选方式、类别、AAOCA 处理状态及 `handling_evidence_ids`。原标量 `procedure_mode` 在单一方式时维持原值，多种方式时为 `mixed`；多选字段不会包含 `mixed`。这是证据层列表，不能以列表长度当作手术次数。 |
 | `management_complexity_flags` | 可并存的事实/疑难标签，例如其他心脏操作后 AAOCA 去向不明、复杂矫治目标不明、仅影像记载未处理、混合管理阶段、拒绝/暂缓、等待讨论、多次 AAOCA 手术及日期不确定。 |
 | `management_context_evidence_ids` | 上述分层的原始证据集合，可 join 到 `management_evidence.csv`。单纯证据缺失标签允许空列表，并明确表示缺失而非阳性结论。 |
 | `complex_case_review_priority/reasons` | `high/medium/routine` 及原因；优先级服务人工研究抽查，不表示医疗紧急程度。高优先级包括其他心脏操作后 AAOCA management 不明、复杂矫治目标不明、直接处理记录冲突或操作类型无法确定。 |
@@ -167,6 +167,12 @@ ASO 等复杂先心矫治中明确存在冠脉 Button 移植时，保留实际�
 出院小结的诊断与末尾决策可能相距数页。仅当入/出院诊断字段明确包含 AAOCA、且没有其他可能的手术目标时，远处明确的“暂无（后续/外科）手术指征”才可归属于 AAOCA；合并间隔缺损、梗阻性肥厚型心肌病等时不使用这条补充路径。多行编号诊断必须整体检查，不能只读取第一项。该决定使用文书日期，并可覆盖更早的手术意向；条件句与“无手术禁忌症”不触发。
 
 取消/暂缓规则允许 PDF 行内换行；因个人原因等出院的拟手术记录保留 `cancelled_or_declined`。所有未证实完成的 AAOCA 手术意向至少列为 `medium` 研究复核优先级。复核不等于临床风险评分，也不能强制把 `conservative` 同步为 `actual_aaoca_surgery=no`。
+
+### v1.3 的去重与操作方式修正
+
+同一处“无需手术干预”等断言可以被具体规则和通用规则同时识别。现在只输出一条代表证据，并用 `matched_rule_ids` 保留全部规则来源；不会把同日不同位置的独立决定合并。选代表规则时保留高强度支持及较具体的决定位置，多学科决定的跨阶段判定仍会检查全部命中规则。
+
+编号、加号或标点分开的术名组成部分分别判定操作方式，避免“经皮冠脉造影 + VSD 修补”的造影入路把修补归为导管治疗。混合心脏手术、导管治疗、非心脏手术可以同时出现在 `procedure_modes` 中；患者级 `other_procedure_modes` 汇总所有方式。
 
 ## 6. QC 和解释边界
 

@@ -443,7 +443,7 @@ def _passages_for_section(
 def _request_evidence(row: dict[str, str]) -> dict:
     return _decode_row(
         row,
-        ["procedure_types", "date_candidates", "flags"],
+        ["procedure_types", "date_candidates", "flags", "matched_rule_ids"],
         ["counts_as_aaoca_surgery", "date_requires_review"],
     )
 

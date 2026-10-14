@@ -223,6 +223,8 @@ class ManagementLlmTests(unittest.TestCase):
             self.assertTrue(all(row["case"]["source_passages"] for row in rows))
             for row in rows:
                 summary = row["case"]["deterministic_summary"]
+                for evidence in row["case"]["deterministic_evidence"]:
+                    self.assertIsInstance(evidence["matched_rule_ids"], list)
                 for field in ("other_procedure_contexts", "other_procedure_categories", "management_complexity_flags",
                               "management_context_evidence_ids", "complex_case_review_reasons", "unrelated_procedure_names"):
                     self.assertIsInstance(summary[field], list)

@@ -29,8 +29,8 @@ from .io_utils import sha256_file, write_csv, write_json, write_text
 from .management_context import CONTEXT_FIELDS, CONTEXT_LIST_FIELDS, management_context, procedure_profile
 
 
-RULESET_VERSION = "aaoca_management_rules_v1.2"
-SCHEMA_VERSION = "aaoca_management_v1.1"
+RULESET_VERSION = "aaoca_management_rules_v1.3"
+SCHEMA_VERSION = "aaoca_management_v1.2"
 
 MANAGEMENT_VALUES = {"surgery", "intended_surgery", "conservative", "unknown"}
 SURGERY_STATUS_VALUES = {"yes", "no", "unknown"}
@@ -57,6 +57,7 @@ EVIDENCE_FIELDS = [
     "patient_id",
     "evidence_id",
     "rule_id",
+    "matched_rule_ids",
     "assertion",
     "event_kind",
     "strength",
@@ -635,6 +636,7 @@ def _evidence_row(
         "patient_id": section.get("patient_id", ""),
         "evidence_id": evidence_id,
         "rule_id": rule_id,
+        "matched_rule_ids": [rule_id],
         "assertion": assertion,
         "event_kind": event_kind,
         "strength": strength,
@@ -1253,7 +1255,14 @@ class DeterministicManagementEvidenceExtractor:
     def _deduplicate(rows: list[dict]) -> list[dict]:
         priority = {"high": 2, "medium": 1, "low": 0}
         best: dict[tuple, dict] = {}
+        decisions: dict[tuple, list[dict]] = defaultdict(list)
         for row in rows:
+            if row["assertion"] == "conservative":
+                # Overlapping rules describe one decision, while distinct
+                # offsets can describe different stages on the same day.
+                key = (row["section_id"], row["event_kind"], tuple(row["procedure_types"]), row["evidence_date"])
+                decisions[key].append(row)
+                continue
             key = (
                 row["section_id"],
                 row["assertion"],
@@ -1264,7 +1273,34 @@ class DeterministicManagementEvidenceExtractor:
             current = best.get(key)
             if current is None or priority[row["strength"]] > priority[current["strength"]]:
                 best[key] = row
-        return sorted(best.values(), key=lambda row: (row["char_start"], row["rule_id"], row["evidence_id"]))
+        result = list(best.values())
+        specificity = {
+            "aaoca_intraoperative_assessment_not_treated": 5,
+            "specific_aaoca_operation_explicitly_not_performed": 4,
+            "aaoca_diagnosis_scoped_no_surgical_indication": 3,
+            "aaoca_multidisciplinary_observation": 2,
+            "aaoca_no_near_term_intervention": 2,
+        }
+        for candidates in decisions.values():
+            clusters: list[list[dict]] = []
+            cluster_end = -1
+            for row in sorted(candidates, key=lambda item: (item["assertion_char_start"], item["assertion_char_end"])):
+                if not clusters or row["assertion_char_start"] >= cluster_end:
+                    clusters.append([])
+                    cluster_end = row["assertion_char_end"]
+                else:
+                    cluster_end = max(cluster_end, row["assertion_char_end"])
+                clusters[-1].append(row)
+            for cluster in clusters:
+                selected = max(cluster, key=lambda item: (
+                    priority[item["strength"]], specificity.get(item["rule_id"], 0),
+                    item["assertion_char_start"], item["evidence_id"],
+                ))
+                merged = dict(selected)
+                merged["matched_rule_ids"] = sorted({item["rule_id"] for item in cluster})
+                merged["flags"] = list(dict.fromkeys(flag for item in cluster for flag in item["flags"]))
+                result.append(merged)
+        return sorted(result, key=lambda row: (row["char_start"], row["rule_id"], row["evidence_id"]))
 
 
 def extract_management_evidence(
@@ -1532,7 +1568,9 @@ def _patient_summary(
         decisive_observation = [
             row
             for row in conservative
-            if row["rule_id"] in {"aaoca_multidisciplinary_observation", "aaoca_no_near_term_intervention"}
+            if set(_json_list(row.get("matched_rule_ids")) or [row["rule_id"]]) & {
+                "aaoca_multidisciplinary_observation", "aaoca_no_near_term_intervention"
+            }
         ]
         conservative_supersedes = bool(
             explicit_conservative
@@ -1952,6 +1990,13 @@ def validate_management_package(
     events = _read_csv(required["events"])
     qc = _read_csv(required["qc"])
     metadata = json.loads(required["metadata"].read_text(encoding="utf-8"))
+    if metadata.get("schema_version") != SCHEMA_VERSION:
+        return {
+            "validation_status": "failed", "error_count": 1, "warning_count": 0,
+            "errors": [{"code": "management_schema_version_mismatch", "expected": SCHEMA_VERSION,
+                        "actual": metadata.get("schema_version"), "action": "rebuild_from_source"}],
+            "warnings": [],
+        }
     selected_ids = {row["patient_id"] for row in selection if _bool(row["included_for_management"])}
     summary_ids = [row["patient_id"] for row in summaries]
     if len(summary_ids) != len(set(summary_ids)):
@@ -1964,6 +2009,9 @@ def validate_management_package(
         errors.append({"code": "duplicate_evidence_id"})
     evidence_by_patient: dict[str, list[dict[str, str]]] = defaultdict(list)
     for item in evidence:
+        matched_rules = _json_list(item.get("matched_rule_ids"))
+        if not matched_rules or item["rule_id"] not in matched_rules or len(matched_rules) != len(set(matched_rules)):
+            errors.append({"code": "evidence_matched_rules_invalid", "evidence_id": item["evidence_id"]})
         evidence_by_patient[item["patient_id"]].append(item)
     event_by_id = {row["surgery_event_id"]: row for row in events}
     if len(event_by_id) != len(events):

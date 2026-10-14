@@ -20,6 +20,46 @@ def operation(text, *, day="2024-05-02", section_id="doc_a_s0001"):
 
 
 class ManagementContextTests(unittest.TestCase):
+    def test_overlapping_rules_are_one_assertion_with_all_rule_provenance(self):
+        row, evidence = summarize(_section(
+            "p", "doc_a_s0001", "AAOCA无需手术干预。", section_type="progress",
+        ))
+        conservative = [item for item in evidence if item["assertion"] == "conservative"]
+        self.assertEqual(len(conservative), 1)
+        self.assertEqual(set(conservative[0]["matched_rule_ids"]),
+                         {"aaoca_no_near_term_intervention", "aaoca_explicit_nonoperative_plan"})
+        self.assertEqual(row["observed_management"], "conservative")
+        self.assertEqual(row["actual_aaoca_surgery"], "no")
+
+    def test_same_day_distinct_decisions_keep_separate_offsets(self):
+        _, evidence = summarize(_section(
+            "p", "doc_a_s0001", "AAOCA无需手术干预。复查后再次讨论：AAOCA无需手术干预。",
+            section_type="progress",
+        ))
+        conservative = [item for item in evidence if item["assertion"] == "conservative"]
+        self.assertEqual(len(conservative), 2)
+        self.assertNotEqual(conservative[0]["assertion_char_start"], conservative[1]["assertion_char_start"])
+
+    def test_mixed_modes_keep_surgery_catheter_and_noncardiac_components(self):
+        row, _ = summarize(operation(
+            "手术记录。手术名称：1.VSD修补2.经导管肺动脉瓣植入术3.阑尾切除术 手术医生：测试。术顺。"
+        ))
+        self.assertEqual(row["other_procedure_modes"],
+                         ["cardiac_catheter_intervention", "cardiac_surgery", "noncardiac_surgery"])
+        context = row["other_procedure_contexts"][0]
+        self.assertEqual(context["procedure_mode"], "mixed")
+        self.assertEqual(context["procedure_modes"], row["other_procedure_modes"])
+        self.assertIn("completed_other_cardiac_procedure", row["management_complexity_flags"])
+        self.assertIn("completed_noncardiac_procedure", row["management_complexity_flags"])
+        self.assertEqual(row["actual_aaoca_surgery"], "unknown")
+
+    def test_diagnostic_access_cues_do_not_change_another_component_mode(self):
+        row, _ = summarize(operation(
+            "手术记录。手术名称：1.经皮冠状动脉造影2.VSD修补 手术医生：测试。术顺。"
+        ))
+        self.assertEqual(row["other_procedure_modes"], ["cardiac_surgery"])
+        self.assertTrue(row["has_diagnostic_procedure_evidence"])
+
     def test_septal_repair_does_not_resolve_aaoca_management(self):
         row, evidence = summarize(operation(
             "手术记录。手术名称：1.VSD修补2.PFO修补 手术医生：测试。术顺。"

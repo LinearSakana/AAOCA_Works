@@ -58,23 +58,33 @@ def _true(value: object) -> bool:
     return value is True or str(value).lower() in {"true", "1", "yes"}
 
 
-def procedure_profile(name: str) -> tuple[str, list[str]]:
-    """Classify the named completed procedure, never a nearby diagnosis."""
+def procedure_modes_and_categories(name: str) -> tuple[list[str], list[str]]:
+    """Keep each named component's mode without borrowing another's cues."""
     compact = re.sub(r"\s+", "", name)
     # Anatomical subtypes in parentheses are not actions.  Separate numbered
     # procedures so "肺动脉瓣下型)2.PFO修补" cannot become a valve repair.
     procedure_text = re.sub(r"[（(][^()（）]*[)）]", "", compact)
     phrases = re.split(r"\d+[.．、]|[、,，;；+]", procedure_text)
-    categories = [category for category, pattern in COMPILED_CATEGORIES
-                  if any(pattern.search(phrase) for phrase in phrases)]
-    cardiac = [category for category in categories if category != "noncardiac_procedure"]
-    if cardiac:
-        mode = "cardiac_catheter_intervention" if re.search(r"经导管|经皮|封堵|球囊|消融|支架", compact) else "cardiac_surgery"
-    elif "noncardiac_procedure" in categories:
-        mode = "noncardiac_surgery"
-    else:
-        mode, categories = "unclassified_operation", ["unclassified_operation"]
-    return mode, categories
+    modes: set[str] = set()
+    categories: set[str] = set()
+    for phrase in phrases:
+        matched = {category for category, pattern in COMPILED_CATEGORIES if pattern.search(phrase)}
+        categories.update(matched)
+        if matched - {"noncardiac_procedure"}:
+            modes.add("cardiac_catheter_intervention" if re.search(
+                r"经导管|经皮|封堵|球囊|消融|支架", phrase
+            ) else "cardiac_surgery")
+        if "noncardiac_procedure" in matched:
+            modes.add("noncardiac_surgery")
+    if not categories:
+        return ["unclassified_operation"], ["unclassified_operation"]
+    return sorted(modes), [category for category, _ in COMPILED_CATEGORIES if category in categories]
+
+
+def procedure_profile(name: str) -> tuple[str, list[str]]:
+    """Retain the scalar interface; a heterogeneous field is explicitly mixed."""
+    modes, categories = procedure_modes_and_categories(name)
+    return modes[0] if len(modes) == 1 else "mixed", categories
 
 
 def _assertion_text(row: dict) -> str:
@@ -119,8 +129,9 @@ def management_context(evidence: list[dict], events: list[dict], management: str
         high_priority |= high
 
     for operation in operations:
-        mode, categories = procedure_profile(operation.get("procedure_name_raw", ""))
-        cardiac = mode.startswith("cardiac_")
+        operation_modes, categories = procedure_modes_and_categories(operation.get("procedure_name_raw", ""))
+        mode = operation_modes[0] if len(operation_modes) == 1 else "mixed"
+        cardiac = any(value.startswith("cardiac_") for value in operation_modes)
         peers = [row for row in evidence if row["section_id"] == operation["section_id"] or (
             row["document_id"] == operation["document_id"]
             and row.get("date_precision") == operation.get("date_precision") == "day"
@@ -153,6 +164,7 @@ def management_context(evidence: list[dict], events: list[dict], management: str
             "procedure_evidence_id": operation["evidence_id"],
             "procedure_date": operation.get("evidence_date", ""),
             "procedure_mode": mode,
+            "procedure_modes": operation_modes,
             "procedure_categories": categories,
             "aaoca_handling": handling,
             "handling_evidence_ids": sorted({row["evidence_id"] for row in support}),
@@ -171,14 +183,15 @@ def management_context(evidence: list[dict], events: list[dict], management: str
             if (set(categories) & COMPLEX_RELATION_CATEGORIES or manipulation
                     or re.search(r"肺动脉干.{0,4}(?:移位|转位)", operation["procedure_name_raw"])) and not repairs:
                 flag("complex_procedure_aaoca_relation_uncertain", [operation, *manipulation], review=True, high=True)
-        elif mode == "noncardiac_surgery":
+        if "noncardiac_surgery" in operation_modes:
             flag("completed_noncardiac_procedure", [operation])
-        else:
+        if mode == "unclassified_operation":
             flag("completed_procedure_type_unclassified", [operation], review=True, high=True)
 
-    modes = sorted({context["procedure_mode"] for context in contexts})
+    modes = sorted({mode for context in contexts for mode in context["procedure_modes"]})
     categories = sorted({category for context in contexts for category in context["procedure_categories"]})
-    handling_values = sorted({context["aaoca_handling"] for context in contexts if context["procedure_mode"].startswith("cardiac_")})
+    handling_values = sorted({context["aaoca_handling"] for context in contexts
+                             if any(mode.startswith("cardiac_") for mode in context["procedure_modes"])})
     cardiac_status = ("completed_other_cardiac_procedure" if any(mode.startswith("cardiac_") for mode in modes)
                       else "diagnostic_only_documented" if diagnostics else "none_documented")
     if diagnostics and not events and not operations:
