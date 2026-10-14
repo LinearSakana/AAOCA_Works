@@ -7,7 +7,7 @@
 - `llm_invoked=false`；
 - `network_processing=false`；
 - `endpoint_configured=false`；
-- 没有真实 response，也没有 LLM-derived patient label。
+- 没有绑定当前 source 的真实 response 或 hybrid 结论；早期诊断试跑记录属于旧请求实验。
 
 deterministic 包仍可独立使用。LLM 是可替换 sidecar，不改变 `data/derived/aaoca_management_rules_v1/` 的任何文件。
 
@@ -24,7 +24,7 @@ deterministic 包仍可独立使用。LLM 是可替换 sidecar，不改变 `data
 - 明确的上下文纳入/省略收据；
 - prompt/interface/schema 版本。
 
-management v1.2 新增的复杂处置字段全部随 summary 进入请求；JSON 列解码为真正的数组/对象。默认 `ambiguous` 路由同时纳入高优先级复杂病例，包括已有 AAOCA 手术但另一次复杂操作目标不明的患者。`context_only` 不能充当手术完成证据。prompt 更新为 `aaoca_management_review_prompt_v1.1`，provider/response contract 不固定新模型或 endpoint。
+management v1.3 的复杂处置字段、逐操作多选方式及 evidence 的 `matched_rule_ids` 全部随请求进入；JSON 列解码为真正的数组/对象。默认 `ambiguous` 路由同时纳入高优先级复杂病例，包括已有 AAOCA 手术但另一次复杂操作目标不明的患者。`context_only` 不能充当手术完成证据。prompt 维持 `aaoca_management_review_prompt_v1.1`，provider/response schema 维持 v1。
 
 每个 passage 都有稳定 `passage_id`、`document_id`、`section_id`、页码、section JSON 路径与 pointer、`section_char_start/end` 和原文。请求包验证器会回到 source section，要求 `text == section_text[start:end]`。
 
@@ -71,6 +71,8 @@ def complete(request, response_schema) -> Mapping[str, object]:
 ### Sidecar reconciliation
 
 `reconcile_llm_responses` 输出新的 `hybrid_management_summary.csv` 和完整 `llm_assessments.jsonl`，不修改 deterministic CSV。
+
+对账前必须验证请求绑定的 management metadata、summary、evidence 和 event hashes 与传入包一致，再验证 response ID、引用和状态。只校验旧 response 对旧 request 成立，不能证明它可用于当前 management。新 sidecar schema 为 `aaoca_management_hybrid_v1.1`；metadata 同时绑定 management metadata、summary、request metadata、requests 和 responses。`validate_hybrid_package` / `validate-hybrid` 会重新校验上游、逐行结果、引用副本、完成状态和保存的验证收据。
 
 v1 策略刻意保守：
 
@@ -121,7 +123,9 @@ python -X utf8 scripts/aaoca_management_llm.py prepare `
   --prompt-version my_management_prompt_v2
 ```
 
-request ID 同时绑定 prompt version、prompt SHA256、management metadata hash 和 selection policy，避免不同实验静默混用。
+request identity 为 `aaoca_management_request_payload_v2`：ID 绑定完整请求正文（含 summary/evidence/events/passages/receipt）、prompt、response schema、上游文件 hashes 和全部上下文限额。同一内容与限额可复现同一 ID；改变限额或 payload 会产生新 ID。验证器重新计算 ID 并在提供 management/run 时检查完整 deterministic 内容及原文。旧 identity 包必须重新 `prepare`，不通过修改旧 response 的 ID 或 hash 迁移结果。
+
+`prepare`、执行和对账的输出路径不得与上游包重叠，防止覆盖上游 `run_metadata.json` 或请求文件。
 
 ## 4. 接入已批准 adapter 后
 
@@ -146,7 +150,7 @@ result = execute_llm_requests(
 )
 ```
 
-执行函数逐 request 调用 adapter、原子写入 JSONL，并立即运行 response validator。provider 可在 adapter 内实现批处理、重试、速率控制和鉴权；它们不进入临床抽取 contract。
+执行函数先根据 request metadata 中保存的 management/run 路径核对当前 source，再逐 request 调用 adapter、原子写入 JSONL，并立即运行 response validator。搬移本地包后可显式传入 `management_root` 与 `run_root`；路径可替换，内容 hashes 仍须匹配。缺失或过期 source 会在第一次 adapter 调用前失败。provider 可在 adapter 内实现批处理、重试、速率控制和鉴权；它们不进入临床抽取 contract。
 
 外部生成 response 后也可单独执行：
 
@@ -154,26 +158,36 @@ result = execute_llm_requests(
 python -X utf8 scripts/aaoca_management_llm.py validate-responses `
   --requests data/derived/aaoca_management_llm_requests_v1 `
   --responses data/derived/aaoca_management_llm_responses_v1/responses.jsonl `
+  --management data/derived/aaoca_management_rules_v1 `
+  --run data/derived/v0.1_full `
   --require-complete
 
 python -X utf8 scripts/aaoca_management_llm.py reconcile `
   --management data/derived/aaoca_management_rules_v1 `
   --requests data/derived/aaoca_management_llm_requests_v1 `
   --responses data/derived/aaoca_management_llm_responses_v1/responses.jsonl `
-  --output data/derived/aaoca_management_hybrid_v1
+  --output data/derived/aaoca_management_hybrid_v1 `
+  --run data/derived/v0.1_full
+
+python -X utf8 scripts/aaoca_management_llm.py validate-hybrid `
+  --output data/derived/aaoca_management_hybrid_v1 `
+  --management data/derived/aaoca_management_rules_v1 `
+  --requests data/derived/aaoca_management_llm_requests_v1 `
+  --responses data/derived/aaoca_management_llm_responses_v1/responses.jsonl `
+  --run data/derived/v0.1_full
 ```
 
 ## 5. 历史 request package 与本轮覆盖约定
 
-2026-09-26 的默认 prepare 从 230 位 deterministic 患者中选出 124 位：5 surgery、11 intended surgery、20 conservative、88 unknown。436 条可用 deterministic evidence 全部进入请求，没有 evidence row 因限额省略。上下文形成 2,734 个 passages，共 2,778,830 个字符。这些是历史数值；本轮 v1.2 覆盖后的计数见 `run_metadata.json` 与 2026-10-14 验收报告。
+2026-09-26 的默认 prepare 从 230 位 deterministic 患者中选出 124 位：5 surgery、11 intended surgery、20 conservative、88 unknown。436 条可用 deterministic evidence 全部进入请求，没有 evidence row 因限额省略。上下文形成 2,734 个 passages，共 2,778,830 个字符。这些是历史数值；当前计数见本地 `run_metadata.json`。
 
 122/124 个请求的 `context_truncated=true`，原因主要是患者可用 section 多于默认 24 个；这不表示已有 436 条 management evidence 被删除。每个请求仍保留实际 included/omitted receipt。最小/中位/最大 passage 字符量约为 7,422 / 21,820 / 39,750，均低于 80,000 的 patient 上限。
 
 此目录包含临床原文，只能本地保存。本轮没有生成真实 response，也没有运行 reconciliation 得到新的真实 hybrid label；本轮测试中的 response 只来自合成病例和 fake client。早期测试目录的存在不能视为当前请求已经得到响应。
 
-按本轮用户要求，LLM 分支仅作为可替换测试原型，旧 response/hybrid 不做迁移或兼容处理。更新 deterministic 后重新 prepare，所有请求绑定新 source hashes；真实模型尚未接入时只交付新请求包和 fake-client 测试通过的接口，不制造新模型结论。2026-10-14 清理旧 `aaoca_management_llm_responses_v1`、`aaoca_management_hybrid_trial_v1`、`aaoca_management_llm_audit_v1` 目录的命令被执行环境拒绝，因此它们仍可能存在，但不属于本次输出，不得与重建的请求混用。
+按本轮用户要求，LLM 分支仅作为可替换测试原型，旧 response/hybrid 可以覆盖或删除，不迁移。初次重跑时清理命令被执行环境拒绝，用户随后手动删除又还原了三个旧实验目录。兼容检查确认全部 11 个历史 response ID 与当前请求不匹配，旧 hybrid 的 management-summary/request-metadata/requests 三项 hashes 不匹配；它们不能用于当前结果。完成新包验证后重置旧实验目录。
 
-本轮正式重建结果：126 个请求（7 surgery / 11 intended / 31 conservative / 77 unknown），525 条 management evidence 全部纳入，2,783 个原文 passages、2,830,080 字符。124 个请求的额外 section 上下文因默认限额而截断，receipt 保留具体 omitted 信息；这与 evidence rows 无遗漏是两个不同维度。新字段已正确解码为 JSON 对象/数组，高优先级复杂病例纳入默认 ambiguous 路由。请求与原文验证为 0 errors / 0 warnings；端到端 fake-client 测试通过，没有 endpoint 调用。
+2026-10-14 首次完整重跑（v1.2）曾生成 126 个请求（7 surgery / 11 intended / 31 conservative / 77 unknown），纳入 525 条 evidence、2,783 个 passages、2,830,080 字符，124 个请求报告额外 section 上下文截断。这是去重修正前的历史收据；当前请求以 v2 identity 重建。证据行是否遗漏与额外原文上下文是否截断是不同维度。
 
 ## 6. 仍需用户决定的内容
 

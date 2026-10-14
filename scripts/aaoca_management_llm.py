@@ -28,6 +28,7 @@ from aaoca_pipeline.management_llm import (
     reconcile_llm_responses,
     validate_llm_request_package,
     validate_llm_responses,
+    validate_hybrid_package,
 )
 
 
@@ -66,12 +67,22 @@ def main() -> int:
     validate_responses.add_argument("--requests", type=Path, required=True)
     validate_responses.add_argument("--responses", type=Path, required=True)
     validate_responses.add_argument("--require-complete", action="store_true")
+    validate_responses.add_argument("--management", type=Path, help="Also verify current deterministic source hashes")
+    validate_responses.add_argument("--run", type=Path, help="Also verify exact source passages")
 
     reconcile = subparsers.add_parser("reconcile", help="Create a non-overwriting deterministic/LLM sidecar")
     reconcile.add_argument("--management", type=Path, required=True)
     reconcile.add_argument("--requests", type=Path, required=True)
     reconcile.add_argument("--responses", type=Path, required=True)
     reconcile.add_argument("--output", type=Path, required=True)
+    reconcile.add_argument("--run", type=Path)
+
+    validate_hybrid = subparsers.add_parser("validate-hybrid", help="Check a sidecar against its current sources")
+    validate_hybrid.add_argument("--output", type=Path, required=True)
+    validate_hybrid.add_argument("--management", type=Path, required=True)
+    validate_hybrid.add_argument("--requests", type=Path, required=True)
+    validate_hybrid.add_argument("--responses", type=Path, required=True)
+    validate_hybrid.add_argument("--run", type=Path)
 
     args = parser.parse_args()
     if args.command == "prepare":
@@ -104,9 +115,13 @@ def main() -> int:
             args.requests,
             args.responses,
             require_complete=args.require_complete,
+            management_root=args.management,
+            run_root=args.run,
         )
+    elif args.command == "reconcile":
+        result = reconcile_llm_responses(args.management, args.requests, args.responses, args.output, run_root=args.run)
     else:
-        result = reconcile_llm_responses(args.management, args.requests, args.responses, args.output)
+        result = validate_hybrid_package(args.output, args.management, args.requests, args.responses, run_root=args.run)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     validation_status = result.get("validation_status")
     if validation_status is None:

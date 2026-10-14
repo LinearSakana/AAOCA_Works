@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import subprocess
+import sys
 
 from aaoca_pipeline.io_utils import sha256_file, write_csv, write_json, write_text
 from aaoca_pipeline.management import write_management_package
@@ -16,6 +18,7 @@ from aaoca_pipeline.management_llm import (
     reconcile_llm_responses,
     validate_llm_request_package,
     validate_llm_responses,
+    validate_hybrid_package,
 )
 
 
@@ -194,7 +197,11 @@ def _response_for(request: dict) -> dict:
 
 
 class _FakeClient:
+    def __init__(self):
+        self.calls = 0
+
     def complete(self, request, response_schema):
+        self.calls += 1
         self.response_schema_id = response_schema["$id"]
         return _response_for(request)
 
@@ -252,6 +259,137 @@ class ManagementLlmTests(unittest.TestCase):
             self.assertEqual(rows["p_unknown"]["recommended_management"], "unknown")
             self.assertEqual(rows["p_unknown"]["comparison"], "disagreement_review")
             self.assertEqual(rows["p_surgery"]["comparison"], "no_response")
+            self.assertEqual(validate_hybrid_package(hybrid, management, requests, responses, run_root=run)
+                             ["validation_status"], "passed")
+
+    def test_request_identity_changes_with_context_limits_and_rejects_old_responses(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            run, review, management = _make_sources(root)
+            first, second, repeated = (root / name for name in ("first", "second", "repeated"))
+            prepare_llm_request_package(management, run, review, first)
+            prepare_llm_request_package(management, run, review, repeated)
+            prepare_llm_request_package(management, run, review, second, max_characters_per_section=30)
+            original = _load_jsonl(first / "requests.jsonl")
+            ids = {row["request_id"] for row in original}
+            self.assertEqual(ids, {row["request_id"] for row in _load_jsonl(repeated / "requests.jsonl")})
+            self.assertTrue(ids.isdisjoint({row["request_id"] for row in _load_jsonl(second / "requests.jsonl")}))
+            responses = root / "old_responses.jsonl"
+            _write_jsonl(responses, [_response_for(row) for row in original])
+            result = validate_llm_responses(second, responses)
+            self.assertEqual({row["code"] for row in result["errors"]}, {"response_request_not_found"})
+
+    def test_changed_request_payload_and_legacy_identity_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            run, review, management = _make_sources(root)
+            requests = root / "requests"
+            prepare_llm_request_package(management, run, review, requests)
+            rows = _load_jsonl(requests / "requests.jsonl")
+            rows[0]["case"]["deterministic_summary"]["observed_management"] = "unknown"
+            _write_jsonl(requests / "requests.jsonl", rows)
+            result = validate_llm_request_package(requests, management, run)
+            self.assertIn("request_content_id_mismatch", {row["code"] for row in result["errors"]})
+            metadata = json.loads((requests / "run_metadata.json").read_text(encoding="utf-8"))
+            metadata.pop("request_identity_version")
+            write_json(requests / "run_metadata.json", metadata)
+            result = validate_llm_request_package(requests)
+            self.assertEqual(result["errors"][0]["code"], "request_identity_version_mismatch")
+
+    def test_stale_management_is_blocked_before_execution_and_reconciliation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            run, review, management = _make_sources(root)
+            requests, responses, hybrid = root / "requests", root / "responses.jsonl", root / "hybrid"
+            prepare_llm_request_package(management, run, review, requests)
+            execute_llm_requests(requests, responses, _FakeClient())
+            reconcile_llm_responses(management, requests, responses, hybrid)
+            metadata_path = management / "run_metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata["revision"] = "a new run with the same patient states"
+            write_json(metadata_path, metadata)
+            client = _FakeClient()
+            with self.assertRaisesRegex(ValueError, "source validation"):
+                execute_llm_requests(requests, root / "new_responses.jsonl", client)
+            self.assertEqual(client.calls, 0)
+            self.assertFalse((root / "new_responses.jsonl").exists())
+            with self.assertRaisesRegex(ValueError, "sources do not match"):
+                reconcile_llm_responses(management, requests, responses, root / "new_hybrid")
+            self.assertFalse((root / "new_hybrid").exists())
+            result = validate_llm_responses(requests, responses, management_root=management)
+            self.assertEqual(result["errors"][0]["code"], "response_request_package_invalid")
+            result = validate_hybrid_package(hybrid, management, requests, responses)
+            self.assertIn("hybrid_source_hash_mismatch", {row["code"] for row in result["errors"]})
+
+    def test_hybrid_row_and_cached_receipt_tampering_are_detected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            run, review, management = _make_sources(root)
+            requests, responses, hybrid = root / "requests", root / "responses.jsonl", root / "hybrid"
+            prepare_llm_request_package(management, run, review, requests)
+            execute_llm_requests(requests, responses, _FakeClient())
+            reconcile_llm_responses(management, requests, responses, hybrid)
+            with (hybrid / "hybrid_management_summary.csv").open(encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            next(row for row in rows if row["patient_id"] == "p_unknown")["recommended_management"] = "surgery"
+            write_csv(hybrid / "hybrid_management_summary.csv", rows)
+            write_json(hybrid / "response_validation.json", {"validation_status": "passed", "error_count": 0})
+            result = validate_hybrid_package(hybrid, management, requests, responses)
+            codes = {row["code"] for row in result["errors"]}
+            self.assertIn("hybrid_row_mismatch", codes)
+            self.assertIn("hybrid_validation_receipt_mismatch", codes)
+
+    def test_output_overlap_never_modifies_upstream_packages(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            run, review, management = _make_sources(root)
+            requests, responses = root / "requests", root / "responses.jsonl"
+            prepare_llm_request_package(management, run, review, requests)
+            _write_jsonl(responses, [_response_for(row) for row in _load_jsonl(requests / "requests.jsonl")])
+            before = {path: sha256_file(path) for folder in (run, management, requests)
+                      for path in folder.rglob("*") if path.is_file()}
+            client = _FakeClient()
+            calls = [
+                lambda: prepare_llm_request_package(management, run, review, management),
+                lambda: reconcile_llm_responses(management, requests, responses, requests),
+                lambda: execute_llm_requests(requests, requests / "requests.jsonl", client),
+            ]
+            for call in calls:
+                with self.assertRaisesRegex(ValueError, "must not overlap"):
+                    call()
+            self.assertEqual(client.calls, 0)
+            self.assertEqual(before, {path: sha256_file(path) for path in before})
+
+    def test_missing_sources_return_validation_failure_before_client_invocation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            run, review, management = _make_sources(root)
+            requests = root / "requests"
+            prepare_llm_request_package(management, run, review, requests)
+            client = _FakeClient()
+            with self.assertRaisesRegex(ValueError, "request_source_artifact_missing"):
+                execute_llm_requests(requests, root / "responses.jsonl", client,
+                                     management_root=root / "missing")
+            self.assertEqual(client.calls, 0)
+
+    def test_cli_validates_hybrid_and_reports_stale_source_with_nonzero_exit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            run, review, management = _make_sources(root)
+            requests, responses, hybrid = root / "requests", root / "responses.jsonl", root / "hybrid"
+            prepare_llm_request_package(management, run, review, requests)
+            execute_llm_requests(requests, responses, _FakeClient())
+            reconcile_llm_responses(management, requests, responses, hybrid)
+            command = [sys.executable, "-X", "utf8", str(Path(__file__).resolve().parents[1] / "scripts/aaoca_management_llm.py"),
+                       "validate-hybrid", "--output", str(hybrid), "--management", str(management),
+                       "--requests", str(requests), "--responses", str(responses), "--run", str(run)]
+            valid = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(valid.returncode, 0, valid.stderr)
+            self.assertEqual(json.loads(valid.stdout)["validation_status"], "passed")
+            write_text(management / "run_metadata.json", (management / "run_metadata.json").read_text(encoding="utf-8") + "\n")
+            stale = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(stale.returncode, 1, stale.stderr)
+            self.assertIn("hybrid_source_hash_mismatch", {row["code"] for row in json.loads(stale.stdout)["errors"]})
 
     def test_hallucinated_citation_and_unsafe_disagreement_are_rejected(self):
         with tempfile.TemporaryDirectory() as temp:

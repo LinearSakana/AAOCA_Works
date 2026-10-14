@@ -39,6 +39,8 @@ from .management import (
 
 LLM_INTERFACE_VERSION = "aaoca_management_llm_v1"
 PROMPT_VERSION = "aaoca_management_review_prompt_v1.1"
+REQUEST_ID_VERSION = "aaoca_management_request_payload_v2"
+HYBRID_SCHEMA_VERSION = "aaoca_management_hybrid_v1.1"
 
 REQUEST_MANIFEST_FIELDS = [
     "request_id",
@@ -300,6 +302,24 @@ def _decode_row(row: dict[str, str], list_fields: Iterable[str], bool_fields: It
     return result
 
 
+def _separate_output(output: Path, inputs: Iterable[Path]) -> None:
+    for source in inputs:
+        source = source.resolve()
+        if output == source or output.is_relative_to(source) or source.is_relative_to(output):
+            raise ValueError("LLM output must not overlap an upstream package or response input")
+
+
+def _request_content_id(request: dict, source_hashes: dict, context_limits: dict) -> str:
+    identity = {
+        "request": {key: value for key, value in request.items() if key != "request_id"},
+        "source_hashes": source_hashes,
+        "context_limits": context_limits,
+        "response_schema": RESPONSE_SCHEMA,
+    }
+    canonical = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return _stable_id("llmreq", REQUEST_ID_VERSION, canonical)
+
+
 def _selection_match(summary: dict[str, str], policy: str) -> bool:
     if policy == "all":
         return True
@@ -501,6 +521,12 @@ Preparing it does not call a model. `run_metadata.json` must say
 - `prompt_template.md`: shared task semantics.
 - `run_metadata.json`: source hashes, context limits and counts.
 
+Request identity v2 binds the complete payload, schemas, source hashes and
+context limits. Reprepare older packages; do not relabel old responses with
+new IDs. Execution verifies the bound management/run before calling an adapter.
+Reconciliation verifies management hashes; validate-hybrid rechecks the sidecar.
+Output paths must remain separate from all upstream input packages.
+
 An adapter implementing `StructuredManagementLLMClient` may later receive a
 request and response schema. Do not use an external endpoint without separate
 data-owner approval. Validate all returned responses before reconciliation.
@@ -536,6 +562,7 @@ def prepare_llm_request_package(
     run_root = run_root.resolve()
     relevance_root = relevance_root.resolve()
     output = output.resolve()
+    _separate_output(output, [management_root, run_root, relevance_root])
     validation = validate_management_package(management_root, run_root, relevance_root)
     if validation["validation_status"] != "passed":
         raise ValueError(f"Management package must validate before LLM preparation: {validation['errors'][:3]}")
@@ -558,6 +585,21 @@ def prepare_llm_request_package(
             events_by_patient[row["patient_id"]].append(row)
     for section in sections:
         sections_by_patient[section["patient_id"]].append(section)
+
+    source_hashes = {
+        "management_metadata": sha256_file(management_root / "run_metadata.json"),
+        "management_summary": sha256_file(management_root / "management_summary.csv"),
+        "management_evidence": sha256_file(management_root / "management_evidence.csv"),
+        "surgery_events": sha256_file(management_root / "surgery_events.csv"),
+        "run_section_index": sha256_file(run_root / "section_index.csv"),
+        "relevance_cases": sha256_file(relevance_root / "exception_cases.csv"),
+    }
+    context_limits = {
+        "max_sections_per_patient": max_sections_per_patient,
+        "max_evidence_rows_per_patient": max_evidence_rows_per_patient,
+        "max_characters_per_section": max_characters_per_section,
+        "max_passage_characters_per_patient": max_passage_characters_per_patient,
+    }
 
     requests: list[dict] = []
     manifest: list[dict] = []
@@ -617,19 +659,9 @@ def prepare_llm_request_package(
                 if section["section_id"] in set(included_section_ids)
             )
         )
-        request_id = _stable_id(
-            "llmreq",
-            LLM_INTERFACE_VERSION,
-            prompt_version,
-            hashlib.sha256(instructions.encode("utf-8")).hexdigest(),
-            patient_id,
-            sha256_file(management_root / "run_metadata.json"),
-            selection_policy,
-        )
         request = {
             "interface_version": LLM_INTERFACE_VERSION,
             "prompt_version": prompt_version,
-            "request_id": request_id,
             "patient_id": patient_id,
             "instructions": instructions,
             "case": {
@@ -651,6 +683,8 @@ def prepare_llm_request_package(
             },
             "response_schema_id": RESPONSE_SCHEMA["$id"],
         }
+        request_id = _request_content_id(request, source_hashes, context_limits)
+        request["request_id"] = request_id
         requests.append(request)
         manifest.append(
             {
@@ -676,16 +710,9 @@ def prepare_llm_request_package(
     write_json(output / "response_schema.json", RESPONSE_SCHEMA)
     write_text(output / "prompt_template.md", instructions)
     write_text(output / "README.md", _request_package_readme())
-    source_hashes = {
-        "management_metadata": sha256_file(management_root / "run_metadata.json"),
-        "management_summary": sha256_file(management_root / "management_summary.csv"),
-        "management_evidence": sha256_file(management_root / "management_evidence.csv"),
-        "surgery_events": sha256_file(management_root / "surgery_events.csv"),
-        "run_section_index": sha256_file(run_root / "section_index.csv"),
-        "relevance_cases": sha256_file(relevance_root / "exception_cases.csv"),
-    }
     metadata = {
         "interface_version": LLM_INTERFACE_VERSION,
+        "request_identity_version": REQUEST_ID_VERSION,
         "prompt_version": prompt_version,
         "prompt_sha256": hashlib.sha256(instructions.encode("utf-8")).hexdigest(),
         "status": "requests_prepared",
@@ -697,12 +724,7 @@ def prepare_llm_request_package(
         "source_management": str(management_root),
         "source_run": str(run_root),
         "source_relevance_review": str(relevance_root),
-        "context_limits": {
-            "max_sections_per_patient": max_sections_per_patient,
-            "max_evidence_rows_per_patient": max_evidence_rows_per_patient,
-            "max_characters_per_section": max_characters_per_section,
-            "max_passage_characters_per_patient": max_passage_characters_per_patient,
-        },
+        "context_limits": context_limits,
         "counts": {
             "requests": len(requests),
             "deterministic_statuses": dict(Counter(row["observed_management"] for row in selected_summaries)),
@@ -767,6 +789,14 @@ def validate_llm_request_package(
             "warnings": [],
         }
 
+    if metadata.get("request_identity_version") != REQUEST_ID_VERSION:
+        return {
+            "validation_status": "failed", "error_count": 1, "warning_count": 0,
+            "requests": len(requests),
+            "errors": [{"code": "request_identity_version_mismatch", "expected": REQUEST_ID_VERSION,
+                        "actual": metadata.get("request_identity_version"), "action": "reprepare_requests"}],
+            "warnings": [],
+        }
     if request_schema != REQUEST_SCHEMA or response_schema != RESPONSE_SCHEMA:
         errors.append({"code": "interface_schema_mismatch"})
     prompt_text = required["prompt"].read_text(encoding="utf-8")
@@ -784,6 +814,8 @@ def validate_llm_request_package(
     for request in requests:
         request_id = request.get("request_id", "")
         patient_id = request.get("patient_id", "")
+        if request_id != _request_content_id(request, metadata.get("source_hashes", {}), metadata.get("context_limits", {})):
+            errors.append({"code": "request_content_id_mismatch", "request_id": request_id})
         if request.get("interface_version") != LLM_INTERFACE_VERSION:
             errors.append({"code": "request_interface_version_invalid", "request_id": request_id})
         if request.get("prompt_version") != metadata.get("prompt_version") or request.get("instructions") != prompt_text:
@@ -804,6 +836,9 @@ def validate_llm_request_package(
         if not isinstance(evidence, list) or not isinstance(events, list) or not isinstance(passages, list):
             errors.append({"code": "request_context_collection_invalid", "request_id": request_id})
             continue
+        if not all(isinstance(row, dict) for row in [*evidence, *events, *passages]):
+            errors.append({"code": "request_context_row_invalid", "request_id": request_id})
+            continue
         evidence_ids = [row.get("evidence_id", "") for row in evidence if isinstance(row, dict)]
         if len(evidence_ids) != len(set(evidence_ids)) or "" in evidence_ids:
             errors.append({"code": "request_evidence_id_invalid", "request_id": request_id})
@@ -820,7 +855,7 @@ def validate_llm_request_package(
             start, end = passage.get("section_char_start"), passage.get("section_char_end")
             if not isinstance(start, int) or not isinstance(end, int) or start < 0 or end < start:
                 errors.append({"code": "request_passage_span_invalid", "request_id": request_id, "passage_id": passage_id})
-            elif len(passage.get("text", "")) != end - start:
+            elif not isinstance(passage.get("text"), str) or len(passage["text"]) != end - start:
                 errors.append({"code": "request_passage_length_mismatch", "request_id": request_id, "passage_id": passage_id})
         if len(local_passage_ids) != len(set(local_passage_ids)):
             errors.append({"code": "duplicate_passage_within_request", "request_id": request_id})
@@ -829,7 +864,8 @@ def validate_llm_request_package(
         else:
             if receipt.get("included_evidence_rows") != len(evidence):
                 errors.append({"code": "request_evidence_receipt_mismatch", "request_id": request_id})
-            if receipt.get("included_passage_characters") != sum(len(row.get("text", "")) for row in passages):
+            if receipt.get("included_passage_characters") != sum(len(row.get("text", "")) for row in passages
+                                                                  if isinstance(row.get("text"), str)):
                 errors.append({"code": "request_passage_receipt_mismatch", "request_id": request_id})
 
     if (
@@ -844,28 +880,45 @@ def validate_llm_request_package(
     counts = metadata.get("counts", {})
     if counts.get("requests") != len(requests):
         errors.append({"code": "request_metadata_count_mismatch"})
+    if errors:
+        return {"validation_status": "failed", "error_count": len(errors), "warning_count": len(warnings),
+                "errors": errors, "warnings": warnings, "requests": len(requests)}
 
     management_evidence_by_id: dict[str, dict[str, str]] = {}
     if management_root:
         management_root = management_root.resolve()
         source_hashes = metadata.get("source_hashes", {})
-        expected_hashes = {
-            "management_metadata": sha256_file(management_root / "run_metadata.json"),
-            "management_summary": sha256_file(management_root / "management_summary.csv"),
-            "management_evidence": sha256_file(management_root / "management_evidence.csv"),
-            "surgery_events": sha256_file(management_root / "surgery_events.csv"),
+        source_files = {
+            "management_metadata": management_root / "run_metadata.json",
+            "management_summary": management_root / "management_summary.csv",
+            "management_evidence": management_root / "management_evidence.csv",
+            "surgery_events": management_root / "surgery_events.csv",
         }
-        for key, expected in expected_hashes.items():
-            if source_hashes.get(key) != expected:
+        for key, path in source_files.items():
+            if not path.is_file():
+                errors.append({"code": "request_source_artifact_missing", "source": key})
+            elif source_hashes.get(key) != sha256_file(path):
                 errors.append({"code": "request_source_hash_mismatch", "source": key})
+        if any(not path.is_file() for path in source_files.values()):
+            return {"validation_status": "failed", "error_count": len(errors), "warning_count": len(warnings),
+                    "errors": errors, "warnings": warnings, "requests": len(requests)}
+        summaries_by_patient = {row["patient_id"]: _request_summary(row)
+                                for row in _read_csv(source_files["management_summary"])}
+        events_by_patient: dict[str, list[dict]] = defaultdict(list)
+        for row in _read_csv(source_files["surgery_events"]):
+            events_by_patient[row["patient_id"]].append(_request_event(row))
         management_evidence_by_id = {
             row["evidence_id"]: row for row in _read_csv(management_root / "management_evidence.csv")
         }
         for request in requests:
             patient_id = request["patient_id"]
+            if request.get("case", {}).get("deterministic_summary") != summaries_by_patient.get(patient_id):
+                errors.append({"code": "request_management_summary_mismatch", "request_id": request["request_id"]})
+            if request.get("case", {}).get("deterministic_surgery_events") != events_by_patient[patient_id]:
+                errors.append({"code": "request_management_events_mismatch", "request_id": request["request_id"]})
             for row in request.get("case", {}).get("deterministic_evidence", []):
                 source = management_evidence_by_id.get(row.get("evidence_id", ""))
-                if not source or source["patient_id"] != patient_id:
+                if not source or source["patient_id"] != patient_id or _request_evidence(source) != row:
                     errors.append(
                         {
                             "code": "request_management_evidence_invalid",
@@ -876,6 +929,10 @@ def validate_llm_request_package(
 
     if run_root:
         run_root = run_root.resolve()
+        if not (run_root / "section_index.csv").is_file():
+            errors.append({"code": "request_source_artifact_missing", "source": "run_section_index"})
+            return {"validation_status": "failed", "error_count": len(errors), "warning_count": len(warnings),
+                    "errors": errors, "warnings": warnings, "requests": len(requests)}
         if metadata.get("source_hashes", {}).get("run_section_index") != sha256_file(run_root / "section_index.csv"):
             errors.append({"code": "request_source_hash_mismatch", "source": "run_section_index"})
         source_sections = {
@@ -979,6 +1036,8 @@ def validate_llm_responses(
     responses_path: Path,
     *,
     require_complete: bool = False,
+    management_root: Path | None = None,
+    run_root: Path | None = None,
 ) -> dict:
     """Validate structured responses without trusting provider output."""
 
@@ -986,6 +1045,13 @@ def validate_llm_responses(
     responses_path = responses_path.resolve()
     errors: list[dict] = []
     warnings: list[dict] = []
+    request_validation = validate_llm_request_package(request_root, management_root, run_root)
+    if request_validation["validation_status"] != "passed":
+        return {
+            "validation_status": "failed", "error_count": 1, "warning_count": 0,
+            "errors": [{"code": "response_request_package_invalid"}], "warnings": [],
+            "request_validation": request_validation,
+        }
     if not responses_path.is_file():
         return {
             "validation_status": "failed",
@@ -1229,6 +1295,7 @@ def validate_llm_responses(
         "responses": len(responses),
         "complete": len(responses) == len(requests) and not (set(request_by_id) - set(response_ids)),
         "response_statuses": dict(response_statuses),
+        "request_validation": request_validation,
         "errors": errors,
         "warnings": warnings,
     }
@@ -1240,6 +1307,8 @@ def execute_llm_requests(
     client: StructuredManagementLLMClient,
     *,
     limit: int | None = None,
+    management_root: Path | None = None,
+    run_root: Path | None = None,
 ) -> dict:
     """Execute prepared requests through an injected adapter.
 
@@ -1249,6 +1318,13 @@ def execute_llm_requests(
     """
 
     request_root = request_root.resolve()
+    metadata = json.loads((request_root / "run_metadata.json").read_text(encoding="utf-8"))
+    management_root = (management_root or Path(metadata["source_management"])).resolve()
+    run_root = (run_root or Path(metadata["source_run"])).resolve()
+    _separate_output(responses_path.resolve(), [request_root, management_root, run_root])
+    validation = validate_llm_request_package(request_root, management_root, run_root)
+    if validation["validation_status"] != "passed":
+        raise ValueError(f"LLM requests failed source validation before invocation: {validation['errors'][:3]}")
     requests = _read_jsonl(request_root / "requests.jsonl")
     if limit is not None:
         if limit <= 0:
@@ -1265,27 +1341,12 @@ def execute_llm_requests(
         request_root,
         responses_path,
         require_complete=limit is None,
+        management_root=management_root,
+        run_root=run_root,
     )
 
 
-def reconcile_llm_responses(
-    management_root: Path,
-    request_root: Path,
-    responses_path: Path,
-    output: Path,
-) -> dict:
-    """Write a sidecar comparison; deterministic patient rows remain unchanged."""
-
-    management_root = management_root.resolve()
-    request_root = request_root.resolve()
-    responses_path = responses_path.resolve()
-    output = output.resolve()
-    response_validation = validate_llm_responses(request_root, responses_path)
-    if response_validation["validation_status"] != "passed":
-        raise ValueError(f"LLM responses failed validation: {response_validation['errors'][:3]}")
-
-    summaries = _read_csv(management_root / "management_summary.csv")
-    responses = _read_jsonl(responses_path)
+def _build_hybrid_rows(summaries: list[dict], responses: list[dict]) -> list[dict]:
     response_by_patient = {row["patient_id"]: row for row in responses}
     hybrid_rows: list[dict] = []
     for summary in summaries:
@@ -1357,11 +1418,42 @@ def reconcile_llm_responses(
             }
         )
 
+    return hybrid_rows
+
+
+def reconcile_llm_responses(
+    management_root: Path,
+    request_root: Path,
+    responses_path: Path,
+    output: Path,
+    *,
+    run_root: Path | None = None,
+) -> dict:
+    """Write a source-bound sidecar without overwriting its upstream inputs."""
+    management_root = management_root.resolve()
+    request_root = request_root.resolve()
+    responses_path = responses_path.resolve()
+    output = output.resolve()
+    _separate_output(output, [management_root, request_root, responses_path])
+    management_validation = validate_management_package(management_root, run_root)
+    if management_validation["validation_status"] != "passed":
+        raise ValueError(f"Management package failed validation: {management_validation['errors'][:3]}")
+    request_validation = validate_llm_request_package(request_root, management_root, run_root)
+    if request_validation["validation_status"] != "passed":
+        raise ValueError(f"LLM request sources do not match management: {request_validation['errors'][:3]}")
+    response_validation = validate_llm_responses(request_root, responses_path)
+    if response_validation["validation_status"] != "passed":
+        raise ValueError(f"LLM responses failed validation: {response_validation['errors'][:3]}")
+    responses = _read_jsonl(responses_path)
+    hybrid_rows = _build_hybrid_rows(_read_csv(management_root / "management_summary.csv"), responses)
     write_csv(output / "hybrid_management_summary.csv", hybrid_rows, HYBRID_FIELDS)
     _write_jsonl(output / "llm_assessments.jsonl", responses)
     write_json(output / "response_validation.json", response_validation)
+    write_json(output / "request_validation.json", request_validation)
     metadata = {
         "interface_version": LLM_INTERFACE_VERSION,
+        "schema_version": HYBRID_SCHEMA_VERSION,
+        "status": "complete" if response_validation["complete"] else "partial_responses",
         "method": "deterministic_with_llm_sidecar",
         "reconciliation_policy": "sidecar_only_no_silent_override_v1",
         "contains_clinical_excerpts": True,
@@ -1376,6 +1468,7 @@ def reconcile_llm_responses(
             "patients_without_response": sum(row["comparison"] == "no_response" for row in hybrid_rows),
         },
         "source_hashes": {
+            "management_metadata": sha256_file(management_root / "run_metadata.json"),
             "management_summary": sha256_file(management_root / "management_summary.csv"),
             "request_metadata": sha256_file(request_root / "run_metadata.json"),
             "requests": sha256_file(request_root / "requests.jsonl"),
@@ -1384,4 +1477,103 @@ def reconcile_llm_responses(
         "code_sha256": sha256_file(Path(__file__)),
     }
     write_json(output / "run_metadata.json", metadata)
-    return {**metadata, "response_validation": response_validation}
+    return {**metadata, "request_validation": request_validation, "response_validation": response_validation}
+
+
+def validate_hybrid_package(
+    output: Path,
+    management_root: Path,
+    request_root: Path,
+    responses_path: Path,
+    *,
+    run_root: Path | None = None,
+) -> dict:
+    """Recheck a sidecar's current sources and rows instead of trusting receipts."""
+    output, management_root, request_root, responses_path = (
+        path.resolve() for path in (output, management_root, request_root, responses_path)
+    )
+    errors: list[dict] = []
+    required = [output / name for name in (
+        "run_metadata.json", "hybrid_management_summary.csv", "llm_assessments.jsonl",
+        "response_validation.json", "request_validation.json",
+    )]
+    sources = {
+        "management_metadata": management_root / "run_metadata.json",
+        "management_summary": management_root / "management_summary.csv",
+        "request_metadata": request_root / "run_metadata.json",
+        "requests": request_root / "requests.jsonl",
+        "responses": responses_path,
+    }
+    for path in [*required, *sources.values()]:
+        if not path.is_file():
+            errors.append({"code": "hybrid_artifact_missing", "path": str(path)})
+    if errors:
+        return {"validation_status": "failed", "error_count": len(errors), "warning_count": 0,
+                "errors": errors, "warnings": []}
+    try:
+        metadata = json.loads(required[0].read_text(encoding="utf-8"))
+        rows = _read_csv(required[1])
+        assessments = _read_jsonl(required[2])
+        responses = _read_jsonl(responses_path)
+        summaries = _read_csv(sources["management_summary"])
+        cached_response_validation = json.loads(required[3].read_text(encoding="utf-8"))
+        cached_request_validation = json.loads(required[4].read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return {"validation_status": "failed", "error_count": 1, "warning_count": 0,
+                "errors": [{"code": "hybrid_package_invalid", "detail": str(exc)}], "warnings": []}
+    if metadata.get("schema_version") != HYBRID_SCHEMA_VERSION or metadata.get("interface_version") != LLM_INTERFACE_VERSION:
+        errors.append({"code": "hybrid_schema_version_mismatch"})
+    for key, path in sources.items():
+        if metadata.get("source_hashes", {}).get(key) != sha256_file(path):
+            errors.append({"code": "hybrid_source_hash_mismatch", "source": key})
+    management_validation = validate_management_package(management_root, run_root)
+    if management_validation["validation_status"] != "passed":
+        errors.append({"code": "hybrid_management_invalid"})
+    request_validation = validate_llm_request_package(request_root, management_root, run_root)
+    response_validation = validate_llm_responses(request_root, responses_path)
+    if request_validation["validation_status"] != "passed":
+        errors.append({"code": "hybrid_requests_invalid"})
+    if response_validation["validation_status"] != "passed":
+        errors.append({"code": "hybrid_responses_invalid"})
+    if assessments != responses:
+        errors.append({"code": "hybrid_assessments_mismatch"})
+    if cached_request_validation != request_validation or cached_response_validation != response_validation:
+        errors.append({"code": "hybrid_validation_receipt_mismatch"})
+    if request_validation["validation_status"] == response_validation["validation_status"] == "passed":
+        expected_rows = _build_hybrid_rows(summaries, responses)
+        actual_by_patient = {row.get("patient_id"): row for row in rows}
+        if len(actual_by_patient) != len(rows) or set(actual_by_patient) != {row["patient_id"] for row in expected_rows}:
+            errors.append({"code": "hybrid_patient_set_mismatch"})
+        for expected in expected_rows:
+            row = actual_by_patient.get(expected["patient_id"], {})
+            try:
+                decoded = {}
+                for field, value in expected.items():
+                    actual = row.get(field)
+                    if isinstance(value, bool):
+                        if str(actual).lower() not in {"true", "false", "1", "0", "yes", "no"}:
+                            raise ValueError("Invalid hybrid boolean")
+                        actual = _bool(actual)
+                    elif isinstance(value, list):
+                        actual = _json_list(actual)
+                    elif isinstance(value, int):
+                        actual = int(actual)
+                    decoded[field] = actual
+                if set(row) != set(HYBRID_FIELDS) or decoded != expected:
+                    errors.append({"code": "hybrid_row_mismatch", "patient_id": expected["patient_id"]})
+            except (TypeError, ValueError):
+                errors.append({"code": "hybrid_row_invalid", "patient_id": expected["patient_id"]})
+        expected_counts = {
+            "patients": len(expected_rows), "responses": len(responses),
+            "agreements": sum(row["comparison"] == "agreement" for row in expected_rows),
+            "disagreements_requiring_review": sum(row["comparison"] == "disagreement_review" for row in expected_rows),
+            "patients_without_response": sum(row["comparison"] == "no_response" for row in expected_rows),
+        }
+        if metadata.get("counts") != expected_counts:
+            errors.append({"code": "hybrid_count_mismatch"})
+        if metadata.get("status") != ("complete" if response_validation["complete"] else "partial_responses"):
+            errors.append({"code": "hybrid_completion_status_mismatch"})
+    return {"validation_status": "passed" if not errors else "failed", "error_count": len(errors),
+            "warning_count": 0, "patients": len(rows), "responses": len(responses), "errors": errors,
+            "warnings": [], "management_validation": management_validation,
+            "request_validation": request_validation, "response_validation": response_validation}
