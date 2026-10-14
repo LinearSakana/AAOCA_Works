@@ -112,8 +112,8 @@ python -X utf8 scripts/aaoca_management.py validate `
 |---|---|
 | `other_cardiac_procedure_status` | `completed_other_cardiac_procedure`：有其他心脏治疗性操作；`diagnostic_only_documented`：只发现诊断性操作而未发现其他心脏治疗操作；`none_documented`：未检出上述其他心脏操作。三者均不否认独立 AAOCA 手术。 |
 | `other_procedure_modes` | JSON 多选：`cardiac_surgery`、`cardiac_catheter_intervention`、`noncardiac_surgery`、`unclassified_operation`。 |
-| `other_procedure_categories` | 依据实际术名细分为间隔缺损修补、瓣膜操作、流出道/肺动脉操作、PDA/主动脉弓操作、肺静脉纠治、复杂先心矫治、其他血管/冠脉操作、电生理及非心脏操作等；可能多选。 |
-| `aaoca_handling_during_other_procedure` | `concomitant_aaoca_repair`、`explicitly_not_treated`、`assessed_no_intervention`、`coronary_manipulated_target_unclear`、`not_documented`、`conflicting_documentation`、`multiple_contexts`、`not_applicable`。 |
+| `other_procedure_categories` | 依据实际术名细分为间隔缺损修补、瓣膜操作、流出道/肺动脉操作、PDA/主动脉弓操作、肺静脉纠治、复杂先心矫治、其他血管/冠脉操作、血管支架、电生理、心包及非心脏操作等；可能多选。 |
+| `aaoca_handling_during_other_procedure` | `concomitant_aaoca_repair`、`explicitly_not_treated`、`assessed_no_intervention`、`anatomy_documented_intervention_unclear`、`coronary_manipulated_target_unclear`、`not_documented`、`conflicting_documentation`、`multiple_contexts`、`not_applicable`。 |
 | `other_procedure_contexts` | JSON 对象列表；每项保留 `procedure_evidence_id`、该证据所载操作日期、操作方式/类别、AAOCA 处理状态及 `handling_evidence_ids`。这是证据层列表，不能以列表长度当作手术次数。 |
 | `management_complexity_flags` | 可并存的事实/疑难标签，例如其他心脏操作后 AAOCA 去向不明、复杂矫治目标不明、仅影像记载未处理、混合管理阶段、拒绝/暂缓、等待讨论、多次 AAOCA 手术及日期不确定。 |
 | `management_context_evidence_ids` | 上述分层的原始证据集合，可 join 到 `management_evidence.csv`。单纯证据缺失标签允许空列表，并明确表示缺失而非阳性结论。 |
@@ -124,6 +124,10 @@ python -X utf8 scripts/aaoca_management.py validate `
 ASO 等复杂先心矫治中明确存在冠脉 Button 移植时，保留实际操作证据，但若目的未明确归属于 AAOCA，使用 `coronary_manipulated_target_unclear`。纯 VSD/PFO 修补且未说明冠脉处理时，使用 `not_documented`；其 AAOCA management 继续为 `unknown`，同时可筛选出已完成间隔修补及高优先级复核。
 
 只有伴随肺动脉成形的 AAOCA 术名不会自动产生“共病操作”，因为肺动脉成形本身可能是 AAOCA 的辅助处理。其他操作名称中同时出现封堵/球囊成形与造影时，保留治疗性操作，不能将整份手术记录降为纯诊断操作。
+
+正式手术经过中的冠脉探查/解剖记录可产生 `anatomy_documented_intervention_unclear`：这表示“确有记录，但不能确定是否干预”，不同于完全没有说明的 `not_documented`。既不能把探查等同于修复，也不能根据肺动脉干移位自行推定 AAOCA 治疗目的。
+
+术名分类先隔离编号并去除括号内的解剖型别，避免将“VSD修补(肺动脉瓣下型)2.PFO修补”跨词误判为瓣膜修补。治疗性识别覆盖消融、植入、支架、心包引流/剥脱等；单独“心导管置入”仍是诊断操作。既往其他心脏介入与后续 AAOCA 观察决定可以同时成立，不能让后者抹掉已经完成的治疗。
 
 ### 其他文件
 
@@ -157,6 +161,12 @@ ASO 等复杂先心矫治中明确存在冠脉 Button 移植时，保留实际�
 独立复核后进一步收紧了覆盖规则：相同日期不再自动视为“后发生”，而是继续比较文档内 section 序号和精确 assertion offset；同一 section 中的拒绝手术不能被随附的普通出院随访吞没；影像报告中“请结合 CT/临床，建议随访”的模板句不产生保守管理；出院小结转抄超声“未处理”标签只作为 medium-strength 阶段证据，不能单独把 `actual_aaoca_surgery` 置为 `no`。
 
 负向保护仍然优先：诊断性“手术造影检查”、其他结构性心脏病的手术/拒绝、普通专科随访、“胸外科会诊或门诊随访”这种尚未形成决定的二选一表述，以及无 AAOCA 局部语境的出院随访均不能触发上述规则。PDF/OCR 行内换行可以出现在“观察/随访”等词中，但字符 offset 仍指向原 section 文本。
+
+### v1.2 的独立抽查修正
+
+出院小结的诊断与末尾决策可能相距数页。仅当入/出院诊断字段明确包含 AAOCA、且没有其他可能的手术目标时，远处明确的“暂无（后续/外科）手术指征”才可归属于 AAOCA；合并间隔缺损、梗阻性肥厚型心肌病等时不使用这条补充路径。多行编号诊断必须整体检查，不能只读取第一项。该决定使用文书日期，并可覆盖更早的手术意向；条件句与“无手术禁忌症”不触发。
+
+取消/暂缓规则允许 PDF 行内换行；因个人原因等出院的拟手术记录保留 `cancelled_or_declined`。所有未证实完成的 AAOCA 手术意向至少列为 `medium` 研究复核优先级。复核不等于临床风险评分，也不能强制把 `conservative` 同步为 `actual_aaoca_surgery=no`。
 
 ## 6. QC 和解释边界
 

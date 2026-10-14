@@ -365,7 +365,8 @@ SPECIFIC_AAOCA_DIAG_RE = re.compile(
 
 OTHER_SURGICAL_LESION_RE = re.compile(
     r"房间隔缺损|室间隔缺损|房室间隔缺损|动脉导管未闭|肺静脉异位引流|主动脉缩窄|"
-    r"右室流出道狭窄|法洛四联症|肺动脉瓣狭窄|二尖瓣.{0,5}(?:关闭不全|反流|狭窄)|"
+    r"右室流出道狭窄|法洛四联症|肺动脉瓣狭窄|肥厚型心肌病|流出道梗阻|右室双出口|"
+    r"大动脉转位|单心室|肺动脉闭锁|二尖瓣.{0,5}(?:关闭不全|反流|狭窄)|"
     r"三尖瓣.{0,5}(?:关闭不全|反流|狭窄)|主动脉瓣.{0,5}(?:关闭不全|反流|狭窄)",
     re.I | re.DOTALL,
 )
@@ -391,7 +392,7 @@ DIAGNOSTIC_PROCEDURE_RE = re.compile(
 )
 
 THERAPEUTIC_OPERATION_RE = re.compile(
-    r"(?:手术|修补|成形|置换|切除|结扎|矫治|纠治|缝合|探查|开胸|搭桥|旁路|移植|再植|转位|封堵)",
+    r"(?:手术|修补|成形|置换|切除|结扎|矫治|纠治|缝合|探查|开胸|搭桥|旁路|移植|再植|转位|封堵|引流|剥脱|清创|消融|扩张|植入|支架)",
     re.I,
 )
 
@@ -475,6 +476,24 @@ def _procedure_types(value: str) -> list[str]:
     if types:
         types.extend(name for name, pattern in ADJUNCT_PATTERNS if pattern.search(compact))
     return list(dict.fromkeys(types))
+
+
+def _aaoca_diagnosis_without_competing_surgical_target(text: str) -> bool:
+    """Link a remote discharge decision only to unambiguous diagnosis fields.
+
+    A discharge note can place its diagnosis pages before its final decision.
+    Do not search the entire note for competing lesions: angiography often
+    explicitly excludes PDA/COA.  Competing positive diagnoses block this
+    fallback, and the short local rules remain responsible for those cases.
+    """
+    diagnoses = re.findall(
+        r"(?:入院|出院)诊断\s*[:：]\s*(.{1,250}?)(?=入院诊断|出院诊断|【|入院情况|出院情况|"
+        r"病程与治疗|辅助检查|体格检查|出院带药|治疗结果|$)",
+        text, re.S,
+    )
+    combined = _compact(" ".join(diagnoses))
+    return bool(SPECIFIC_AAOCA_DIAG_RE.search(combined) and not OTHER_SURGICAL_LESION_RE.search(combined)
+                and not re.search(r"阑尾|肿瘤|疝|骨折|鞘膜|胆囊", combined))
 
 
 def _date_evidence(
@@ -779,6 +798,18 @@ class DeterministicManagementEvidenceExtractor:
                     start=match.start(), end=match.end(), date_policy="section",
                     extra_flags=["does_not_count_as_aaoca_surgery", "complex_procedure_relation_requires_review"],
                 ))
+            body_start = text.find("手术经过")
+            if body_start >= 0:
+                for match in re.finditer(
+                    r"(?:术中[见⻅]|探查)[^。；;]{0,100}(?:冠状动脉|冠脉|[左右]冠(?:瓣)?窦)"
+                    r"[^。；;]{0,65}(?:起源|发自|开口|开又|未予处理|未处理)", text[body_start:], re.I,
+                ):
+                    rows.append(_evidence_row(
+                        section, rule_id="coronary_anatomy_during_other_operation",
+                        assertion="context_only", event_kind="operative_context", strength="high",
+                        relation="unresolved", counts_as_surgery=False, procedure_name="", procedure_types=[],
+                        start=body_start + match.start(), end=body_start + match.end(), date_policy="section",
+                    ))
 
         if section.get("section_type") in {"discharge", "progress", "consultation"} and SPECIFIC_AAOCA_DIAG_RE.search(text):
             for match in re.finditer(
@@ -961,7 +992,9 @@ class DeterministicManagementEvidenceExtractor:
                 _evidence_row(
                     section,
                     rule_id="aaoca_planned_surgery_discharge_before_completion",
-                    assertion="intended",
+                    assertion="cancelled_or_declined" if re.search(
+                        r"(?:但|暂缓|拒绝|放弃|取消|个人原因)[^。；;]{0,90}(?:出院|手术)", match.group(0)
+                    ) else "intended",
                     event_kind="surgical_intent",
                     strength="high",
                     relation="definite",
@@ -973,6 +1006,19 @@ class DeterministicManagementEvidenceExtractor:
                     date_policy="section",
                 )
             )
+
+        if section.get("section_type") in {"discharge", "progress", "consultation"} and _aaoca_diagnosis_without_competing_surgical_target(text):
+            for match in re.finditer(r"(?:暂无|无|不具备)\s*(?:后续|外科)?\s*手\s*术\s*指[征证]", text):
+                prefix = text[max(0, match.start() - 30):match.start()]
+                if re.search(r"是否|待明确|待排除|若|如果", prefix):
+                    continue
+                rows.append(_evidence_row(
+                    section, rule_id="aaoca_diagnosis_scoped_no_surgical_indication",
+                    assertion="conservative", event_kind="management_decision", strength="high",
+                    relation="definite", counts_as_surgery=False, procedure_name="", procedure_types=[],
+                    start=match.start(), end=match.end(), date_policy="section",
+                    extra_flags=["diagnosis_scoped_management_decision"],
+                ))
 
         for match in AAOCA_NO_NEAR_TERM_INTERVENTION_RE.finditer(text):
             rows.append(
@@ -1111,9 +1157,9 @@ class DeterministicManagementEvidenceExtractor:
 
         cancel_pattern = re.compile(
             r"(?:AAOCA|AORCA|冠状动脉起源异常|冠脉起源异常|冠状动脉异常起源|冠脉异常起源)"
-            r"[^。；;\n]{0,90}(?:(?:取消|暂缓|拒绝|放弃|未行|未能行)[^。；;\n]{0,20}手术|暂不手术)|"
-            r"(?:(?:取消|暂缓|拒绝|放弃|未行|未能行)[^。；;\n]{0,20}手术|暂不手术)"
-            r"[^。；;\n]{0,90}(?:AAOCA|AORCA|冠状动脉起源异常|冠脉起源异常|冠状动脉异常起源|冠脉异常起源)",
+            r"[^。；;]{0,90}(?:(?:取消|暂缓|拒绝|放弃|未行|未能行)[^。；;]{0,20}手术|暂不手术)|"
+            r"(?:(?:取消|暂缓|拒绝|放弃|未行|未能行)[^。；;]{0,20}手术|暂不手术)"
+            r"[^。；;]{0,90}(?:AAOCA|AORCA|冠状动脉起源异常|冠脉起源异常|冠状动脉异常起源|冠脉异常起源)",
             re.I | re.DOTALL,
         )
         for match in cancel_pattern.finditer(text):
@@ -1133,6 +1179,7 @@ class DeterministicManagementEvidenceExtractor:
                     procedure_types=[],
                     start=match.start(),
                     end=match.end(),
+                    date_policy="section",
                 )
             )
 

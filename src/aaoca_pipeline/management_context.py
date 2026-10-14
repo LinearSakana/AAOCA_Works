@@ -32,14 +32,16 @@ CONTEXT_LIST_FIELDS = set(CONTEXT_FIELDS) - {
 # competing condition from a broad context window or routine operative language.
 CATEGORY_PATTERNS = [
     ("septal_defect_repair", r"(?:AVSD|VSD|ASD|PFO|房室间隔缺损|室间隔缺损|房间隔缺损|卵圆孔).{0,12}(?:修补|封堵|关闭)"),
-    ("valve_procedure", r"(?:TV|MV|AV|PV|三尖瓣|二尖瓣|主动脉瓣|肺动脉瓣).{0,10}(?:整形|成形|置换|扩张|修补)|Ross手术"),
+    ("valve_procedure", r"(?:TV|MV|AV|PV|三尖瓣|二尖瓣|主动脉瓣|肺动脉瓣).{0,10}(?:整形|成形|置换|扩张|修补|植入)|Ross手术"),
     ("outflow_or_pulmonary_artery_procedure", r"(?:流出道|肺动脉).{0,14}(?:疏通|重建|扩大|成形|移位|转位|环缩|拆除)"),
     ("ductus_or_aortic_arch_procedure", r"(?:PDA|动脉导管未闭|COA|主动脉缩窄|主动脉弓).{0,12}(?:关闭|封堵|结扎|纠治|修补|扩大)"),
     ("pulmonary_venous_repair", r"(?:PAPVC|TAPVC|肺静脉异位引流).{0,10}(?:纠治|矫治|修补)"),
     ("complex_congenital_repair", r"Switch|\bASO\b|动脉调转|大动脉转位.{0,8}(?:纠治|矫治)|Ross手术|Rastelli|Fontan|Glenn|TOF.{0,8}(?:纠治|根治)"),
     ("other_vascular_procedure", r"血管环.{0,8}(?:纠治|切断)|(?:锁骨下动脉|LSA|LCC|VA|大动脉瘤).{0,20}(?:移植|吻合|修补)"),
+    ("vascular_stent_procedure", r"(?:血管|动脉|静脉).{0,12}支架|支架.{0,8}植入"),
     ("other_coronary_procedure", r"冠(?:状动)?脉瘤.{0,8}(?:修补|切除)|冠(?:状动)?脉瘘.{0,8}(?:封堵|结扎|修补)"),
     ("electrophysiology_procedure", r"射频消融|冷冻消融|起搏器.{0,8}(?:植入|更换)"),
+    ("pericardial_procedure", r"心包.{0,8}(?:引流|剥脱|切开|开窗|切除)"),
     ("noncardiac_procedure", r"鞘状突|鞘膜|阴囊|阑尾|胸壁.{0,8}(?:切除|清创)|皮瓣|皮肤|皮下组织|软组织病损|纵[膈隔]囊肿"),
 ]
 COMPILED_CATEGORIES = [(name, re.compile(pattern, re.I)) for name, pattern in CATEGORY_PATTERNS]
@@ -59,10 +61,15 @@ def _true(value: object) -> bool:
 def procedure_profile(name: str) -> tuple[str, list[str]]:
     """Classify the named completed procedure, never a nearby diagnosis."""
     compact = re.sub(r"\s+", "", name)
-    categories = [category for category, pattern in COMPILED_CATEGORIES if pattern.search(compact)]
+    # Anatomical subtypes in parentheses are not actions.  Separate numbered
+    # procedures so "肺动脉瓣下型)2.PFO修补" cannot become a valve repair.
+    procedure_text = re.sub(r"[（(][^()（）]*[)）]", "", compact)
+    phrases = re.split(r"\d+[.．、]|[、,，;；+]", procedure_text)
+    categories = [category for category, pattern in COMPILED_CATEGORIES
+                  if any(pattern.search(phrase) for phrase in phrases)]
     cardiac = [category for category in categories if category != "noncardiac_procedure"]
     if cardiac:
-        mode = "cardiac_catheter_intervention" if re.search(r"封堵|球囊|消融", compact) else "cardiac_surgery"
+        mode = "cardiac_catheter_intervention" if re.search(r"经导管|经皮|封堵|球囊|消融|支架", compact) else "cardiac_surgery"
     elif "noncardiac_procedure" in categories:
         mode = "noncardiac_surgery"
     else:
@@ -124,6 +131,7 @@ def management_context(evidence: list[dict], events: list[dict], management: str
         untreated = [row for row in peers if row["assertion"] == "conservative" and row["strength"] == "high"
                      and re.search(r"未(?:予)?处理|不予处理|无需.{0,4}处理", _assertion_text(row))]
         manipulation = [row for row in peers if row["rule_id"] == "coronary_manipulation_during_other_operation"]
+        assessment = [row for row in peers if row["rule_id"] == "coronary_anatomy_during_other_operation"]
         if not cardiac:
             handling, support = "not_applicable", []
         elif repairs and untreated:
@@ -137,6 +145,8 @@ def management_context(evidence: list[dict], events: list[dict], management: str
             support = untreated
         elif manipulation:
             handling, support = "coronary_manipulated_target_unclear", manipulation
+        elif assessment:
+            handling, support = "anatomy_documented_intervention_unclear", assessment
         else:
             handling, support = "not_documented", []
         contexts.append({
@@ -156,6 +166,8 @@ def management_context(evidence: list[dict], events: list[dict], management: str
                 flag("aaoca_handling_not_documented_during_other_procedure", [operation], review=True)
             if handling in {"explicitly_not_treated", "assessed_no_intervention"}:
                 flag("aaoca_not_treated_during_other_procedure", support)
+            if handling == "anatomy_documented_intervention_unclear":
+                flag("coronary_anatomy_seen_intervention_unresolved", support, review=True)
             if (set(categories) & COMPLEX_RELATION_CATEGORIES or manipulation
                     or re.search(r"肺动脉干.{0,4}(?:移位|转位)", operation["procedure_name_raw"])) and not repairs:
                 flag("complex_procedure_aaoca_relation_uncertain", [operation, *manipulation], review=True, high=True)
@@ -173,7 +185,10 @@ def management_context(evidence: list[dict], events: list[dict], management: str
         flag("diagnostic_procedure_without_therapeutic_operation", diagnostics, review=management == "unknown")
     if intended and conservative and not events:
         flag("mixed_management_stages", [*intended, *conservative], review=True)
-    declined = [row for row in intended if row["assertion"] == "cancelled_or_declined"]
+    if management == "intended_surgery":
+        flag("aaoca_surgical_intent_completion_unproven", intended, review=True)
+    declined = [row for row in intended if row["assertion"] == "cancelled_or_declined"
+                or row["rule_id"] == "aaoca_surgery_recommended_family_deferred"]
     if declined:
         flag("surgery_cancelled_declined_or_deferred", declined, review=not events)
     for row in evidence:

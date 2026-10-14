@@ -96,6 +96,72 @@ class ManagementContextTests(unittest.TestCase):
         self.assertIn("management_decision_pending_documented", row["management_complexity_flags"])
         self.assertTrue(any(item["assertion"] == "context_only" for item in evidence))
 
+    def test_anatomical_subtype_cannot_cross_into_next_procedure(self):
+        row, _ = summarize(operation(
+            "手术记录。手术名称：1.VSD修补(肺动脉瓣下型)2.PFO修补 手术医生：测试。术顺。"
+        ))
+        self.assertEqual(row["other_procedure_categories"], ["septal_defect_repair"])
+
+    def test_remote_final_decision_supersedes_plan_only_with_unambiguous_diagnosis(self):
+        plan = _section("p", "doc_a_s0001", "右冠状动脉起源于左冠窦，拟行冠脉异常起源纠治术。",
+                        day="2024-05-01", section_type="procedure", subtype="preoperative_discussion")
+        for diagnosis, decision, expected in [
+            ("冠状动脉起源异常", "暂无后续手术指征，嘱长期随访。", "conservative"),
+            ("冠状动脉起源异常、房间隔缺损", "暂无手术指征，嘱长期随访。", "intended_surgery"),
+            ("1.冠状动脉起源异常\n2.房间隔缺损", "暂无手术指征，嘱长期随访。", "intended_surgery"),
+            ("梗阻性肥厚型心肌病、冠状动脉起源异常", "暂无手术指征，嘱长期随访。", "intended_surgery"),
+            ("冠状动脉起源异常", "无手术禁忌症，拟下周手术。", "intended_surgery"),
+        ]:
+            with self.subTest(diagnosis=diagnosis, decision=decision):
+                row, _ = summarize(plan, _section(
+                    "p", "doc_a_s0002", f"出院诊断：{diagnosis}\n【入院情况】" + "体格检查正常。" * 90
+                    + "\n病程与治疗经过：" + decision, section_type="discharge",
+                ))
+                self.assertEqual(row["observed_management"], expected)
+
+    def test_wrapped_deferral_and_discharge_preserve_cancelled_evidence(self):
+        for text in [
+            "出院诊断：冠状动脉起源异常。考虑冠状动脉起源异常，拟\n手术治疗，因手术风险大，家属决\n定暂缓手术，办理出院。",
+            "冠状动脉起源异常。患儿拟完善辅助检查后择日手术治疗，但家属因\n个人原因要求出院。",
+        ]:
+            with self.subTest(text=text):
+                row, _ = summarize(_section("p", "doc_a_s0001", text, section_type="discharge"))
+                self.assertEqual(row["observed_management"], "intended_surgery")
+                self.assertTrue(row["has_cancelled_or_declined_evidence"])
+                self.assertEqual(row["complex_case_review_priority"], "medium")
+                self.assertEqual(row["actual_aaoca_surgery"], "unknown")
+
+    def test_coronary_exploration_and_pericardial_surgery_are_retained(self):
+        row, _ = summarize(operation(
+            "手术记录。手术名称：VSD修补、肺动脉干移位术 手术医生：测试。手术经过："
+            "切开主动脉，探查左冠瓣窦见2个冠脉开口，缝合关闭主动脉切口。术顺。"
+        ))
+        self.assertEqual(row["aaoca_handling_during_other_procedure"], "anatomy_documented_intervention_unclear")
+        self.assertEqual(row["actual_aaoca_surgery"], "unknown")
+        row, _ = summarize(operation(
+            "手术记录。手术名称：1.心包引流术2.心包剥脱术 手术医生：测试。术顺。"
+        ))
+        self.assertEqual(row["other_procedure_categories"], ["pericardial_procedure"])
+        self.assertEqual(row["overall_treatment_status"], "surgery")
+        self.assertEqual(row["n_surgery_events"], 0)
+
+    def test_prior_valve_implant_is_separate_from_later_diagnostic_cath_and_observation(self):
+        row, evidence = summarize(
+            operation("手术记录。手术名称：1.经导管肺动脉瓣植入术2.置入一根血管的支架3.单根血管操作 "
+                      "操作目的：置入带瓣肺动脉支架。术顺。", day="2022-02-22"),
+            operation("手术记录。手术名称：1.多根导管冠状动脉造影2.联合的右心和左心导管置入 "
+                      "操作目的：检查。术顺。", day="2026-01-06", section_id="doc_a_s0002"),
+            _section("p", "doc_a_s0003", "右冠起源于左冠窦。心脏内外科讨论后，家属要求先出院观察。",
+                     day="2026-01-08", section_type="discharge"),
+        )
+        self.assertEqual(row["observed_management"], "conservative")
+        self.assertEqual(row["overall_treatment_status"], "surgery")
+        self.assertEqual(row["actual_aaoca_surgery"], "unknown")
+        self.assertEqual(row["other_procedure_modes"], ["cardiac_catheter_intervention"])
+        self.assertEqual(row["other_procedure_categories"], ["valve_procedure", "vascular_stent_procedure"])
+        self.assertEqual([context["procedure_date"] for context in row["other_procedure_contexts"]], ["2022-02-22"])
+        self.assertTrue(any(item["assertion"] == "diagnostic_completed" for item in evidence))
+
 
 if __name__ == "__main__":
     unittest.main()
