@@ -12,3 +12,5 @@ __pycache__/
 output/playwright/
 .playwright-cli/
 .agy-staff/
+/outputs/
+/.codex_pptx_build/
