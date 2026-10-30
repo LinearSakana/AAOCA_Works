@@ -9,6 +9,7 @@
 - [Gold Set 设计与评分](gold_set_evaluation.md)：抽样原则、评分口径和版本比较规则。
 - [AAOCA 相关性例外复核](aaoca_exception_review.md)：哪些病例进入人工队列，以及怎样回写复核结论。
 - [AAOCA 实际治疗与手术整理](aaoca_management.md)：治疗状态、手术证据、复杂操作与当前汇总结果。
+- [AAOCA 管理方式待明确病例后续分类](aaoca_management_followup.md)：77 例未知管理病例的复杂合并病筛查、手术指征/实际结局分轴和医生复核规则。
 - [Management LLM 中间件](aaoca_management_llm.md)：当前仅准备请求、尚未接入真实模型的边界，以及未来接入流程。
 
 配套资料：
