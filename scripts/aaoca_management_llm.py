@@ -1,8 +1,8 @@
-"""Prepare and validate provider-neutral AAOCA management LLM artifacts.
+"""Select, prepare and run bounded AAOCA management review with local tools.
 
-This CLI never calls a model. A separately approved provider adapter should
-implement ``StructuredManagementLLMClient`` and call ``execute_llm_requests``
-from ``aaoca_pipeline.management_llm``.
+The recommended v2 commands are triage, prepare-agent, run-agent and
+validate-agent. Only run-agent invokes DeepSeek, using DEEPSEEK_API_KEY.
+The original offline v1 commands remain available for historical artifacts.
 
 Examples:
   python -X utf8 scripts/aaoca_management_llm.py prepare \
@@ -30,11 +30,32 @@ from aaoca_pipeline.management_llm import (
     validate_llm_responses,
     validate_hybrid_package,
 )
+from aaoca_pipeline.management_agent import (
+    prepare_review, run_review, triage, validate_review_package, validate_review_run,
+)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    route = subparsers.add_parser("triage", help="Offline semantic-need routing of the current cohort")
+    agent_prepare = subparsers.add_parser("prepare-agent", help="Prepare at most 3 selected v2 cases, without a model call")
+    for command in [route, agent_prepare]:
+        command.add_argument("--management", type=Path, required=True)
+        command.add_argument("--run", type=Path, required=True)
+        command.add_argument("--aaoca-review", type=Path, required=True)
+    agent_prepare.add_argument("--output", type=Path, required=True)
+    agent_prepare.add_argument("--patient-id", action="append", help="Repeat for 1..3 eligible patients; default selects highest scores")
+    agent_prepare.add_argument("--max-cases", type=int, default=3)
+    agent_run = subparsers.add_parser("run-agent", help="One paid DeepSeek batch; no automatic retries")
+    agent_run.add_argument("--requests", type=Path, required=True)
+    agent_run.add_argument("--output", type=Path, required=True)
+    agent_run.add_argument("--max-model-calls-per-case", type=int, default=2)
+    agent_run.add_argument("--max-total-calls", type=int, default=6)
+    agent_validate = subparsers.add_parser("validate-agent", help="Offline validation of v2 requests and optional results")
+    agent_validate.add_argument("--requests", type=Path, required=True)
+    agent_validate.add_argument("--output", type=Path, help="Validate a saved run as well as its request package")
 
     prepare = subparsers.add_parser("prepare", help="Create local JSONL requests without invoking a model")
     prepare.add_argument("--management", type=Path, required=True, help="Validated deterministic management package")
@@ -85,7 +106,20 @@ def main() -> int:
     validate_hybrid.add_argument("--run", type=Path)
 
     args = parser.parse_args()
-    if args.command == "prepare":
+    if args.command == "triage":
+        from collections import Counter
+        rows, _, _, _ = triage(args.management, args.run, args.aaoca_review)
+        result = {"routing_counts": dict(Counter(row["route"] for row in rows)),
+                  "eligible": sorted([row for row in rows if row["route"] == "needs_llm"], key=lambda row: (-row["score"], row["patient_id"]))}
+    elif args.command == "prepare-agent":
+        result = prepare_review(args.management, args.run, args.aaoca_review, args.output,
+                                patient_ids=args.patient_id, max_cases=args.max_cases)
+    elif args.command == "run-agent":
+        result = run_review(args.requests, args.output, max_model_calls=args.max_model_calls_per_case,
+                            max_total_calls=args.max_total_calls)
+    elif args.command == "validate-agent":
+        result = validate_review_run(args.requests, args.output) if args.output else validate_review_package(args.requests)
+    elif args.command == "prepare":
         instructions = (
             args.instructions_file.read_text(encoding="utf-8")
             if args.instructions_file

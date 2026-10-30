@@ -1,125 +1,89 @@
-# AAOCA Management LLM 中间件
+# AAOCA Management LLM 复核
 
-## 1. 当前状态
+当前推荐使用 `scripts/aaoca_management_llm.py` 的 v2 工具复核流程：先在本地筛选有实际语义问题的病例，准备中文时间线与少量原文窗口，再按需调用 DeepSeek。每批最多三例，结果保存为独立复核 sidecar；确定性规则包和原始病历不被回写。
 
-这一层已经能从[确定性 Management 结果](aaoca_management.md)准备结构化请求、检查外部返回、并生成独立的对账结果，但仓库没有内置模型、服务地址、密钥或网络调用。
+## 哪些病例进入模型
 
-当前正式状态是：
+分流依据是当前 management summary、证据和完整 section 集合。`needs_llm` 是待选候选，不表示全部会发送；一次 `prepare-agent` 只从中选一至三例，也可以用重复的 `--patient-id` 明确选人。
 
-- 已准备并检查 126 个待审请求；
-- 对入选的 126 位患者，522 条已抽取 management 证据全部进入相应请求，没有证据行因限额省略；
-- 较长患者记录会明确提示还有额外 section 未纳入；
-- 没有运行真实患者级模型响应；
-- 没有生成可用的 hybrid 临床结论。
+- `rules_sufficient`：规则已解决的手术和明确管理路径。常见 OCR、日期精度或一般复核标记不会单独触发模型。
+- `insufficient_documentation`：当前来源没有可供进一步解释的处置线索。保留未知，补充资料比调用模型更有价值。
+- `needs_llm`：冠脉操作的治疗目标未明、规则未解决的明确处置措辞、与规则“未完成”结论冲突的术后追记，或确有日期不确定的意向/观察冲突。
 
-因此，当前确定性结果可以独立使用；LLM 分支只是一个尚待审批和人工评估的可替换 sidecar。
+筛选同时检查普通病程、手术记录、门诊和有关治疗的同意/沟通文书。不会因它们被分为 administrative 就丢掉自填决策，也不会把影像模板的常规随访当作手术管理问题。`AAOCA/AOOCA` 异写只用于发现候选，不能直接建立手术事实。
 
-## 2. 为什么与确定性结果分开
+## 模型看到什么
 
-模型适合帮助发现规则遗漏、整理复杂时间线和提出复核候选，但不能在没有来源证据的情况下决定“已经手术”或“明确未手术”。独立 sidecar 有三个目的：
+系统提示词约 1,400 字符，包含三种管理字段的边界、工具使用规则和小型 JSON 示例。病例输入单独提供：规则初判、按日期排列的关键 section 导航、最多八个去重原文窗口。短摘录优先保留手术、末次门诊、同意书自填决策及出院证据，并明确省略范围。显示结构放在引文外，原文字符不改写。
 
-1. 保留原有确定性结果，不因一次模型试验而改变正式数据；
-2. 要求每个模型结论引用当前请求中实际提供的证据；
-3. 把模型与规则的分歧显式交给人工，而不是静默采用模型答案。
+只有两个工具，作用域固定为当前患者：
 
-## 3. 四个环节
+| 工具 | 行为 |
+|---|---|
+| `get_section(section_id, offset=0)` | 返回标题、日期、页码和 section 全文；每页最多 10,000 字符，明确返回剩余内容的 offset。 |
+| `search_sections(query, mode="keyword", offset=0)` | 遍历患者全部 sections；支持原文关键词或正则，返回命中 section 的标题、日期与上下文。每页最多十处；标记截断、超时和下一页。 |
 
-### 准备请求
+搜索正则有长度、运行时间和匹配数量限制。搜索别名需要显式写入查询，工具不会悄悄改写模型的关键词。文书日期不能自动当作手术日期；模型也不能把导航标题当作完成证据。
 
-每位患者一个请求，包含：
+## 运行
 
-- 当前确定性管理摘要；
-- 已去重的 AAOCA 手术事件；
-- 管理证据和复杂操作上下文；
-- 能回到原 section 的原文片段；
-- 纳入和省略的上下文说明；
-- 期望模型返回的结构。
-
-默认选择管理不明、仅有意向、保守观察以及少数复杂或低置信的手术病例。也可以改为只看 `unknown`、全部需要复核的病例或全队列。
-
-### 调用经过批准的模型
-
-仓库只规定一个很小的 adapter 接口：输入请求与返回格式，输出已经解析的结构化结果。具体使用本地模型还是获批的服务、采用何种模型和采样参数、怎样鉴权和限流，都必须在接入时单独决定。
-
-在完成隐私与网络边界审批前，不应把真实病例内容发送到外部服务。
-
-### 检查模型返回
-
-返回必须同时给出管理状态、实际 AAOCA 手术判断、简短理由、不确定点、人工复核需求和来源引用。检查器会拒绝以下情况：
-
-- 引用不存在于当前请求中的证据或原文；
-- 引文与来源片段不一致；
-- 患者或请求错配；
-- 声称完成手术却没有已完成且 AAOCA 相关的事件；
-- 声称明确未手术却没有相应的直接支持；
-- 与确定性结果不同却没有要求人工复核；
-- 日期、状态或事件之间自相矛盾。
-
-如果模型从原文中发现规则未抽到的新候选证据，可以保留为人工复核线索，但不能自动提升为正式手术或保守结论。
-
-### 独立对账
-
-对账结果写入新的 sidecar，不修改确定性 CSV：
-
-- 一致时记录为相互支持；
-- 不一致时保留双方结论并要求人工处理；
-- 没有模型返回的患者继续使用原结果；
-- 上游数据或请求内容改变后，旧返回不能直接套用到新包。
-
-## 4. 准备和检查请求
+安装可选依赖：
 
 ```powershell
-python -X utf8 scripts/aaoca_management_llm.py prepare `
+python -m pip install -e ".[llm]"
+```
+
+先看本地候选，再准备请求；这两步都不调用模型：
+
+```powershell
+python -X utf8 scripts/aaoca_management_llm.py triage `
+  --management data/derived/aaoca_management_rules_v1 `
+  --run data/derived/v0.1_full `
+  --aaoca-review data/review/aaoca_exception_review_v1
+
+python -X utf8 scripts/aaoca_management_llm.py prepare-agent `
   --management data/derived/aaoca_management_rules_v1 `
   --run data/derived/v0.1_full `
   --aaoca-review data/review/aaoca_exception_review_v1 `
-  --output data/derived/aaoca_management_llm_requests_v1
-
-python -X utf8 scripts/aaoca_management_llm.py validate-requests `
-  --requests data/derived/aaoca_management_llm_requests_v1 `
-  --management data/derived/aaoca_management_rules_v1 `
-  --run data/derived/v0.1_full
+  --output scratch/management_review_requests
 ```
 
-可选路由：
+准备包中的 `previews/*.md` 是实际病例输入，`prompt.md` 和 `tools.json` 是实际系统提示与工具定义，`routing_manifest.csv` 保留全部患者的路由理由。可在调用前直接审阅这些文件。
 
-| 路由 | 用途 |
-|---|---|
-| `unknown` | 只审阅确定性结果无法判断的患者。 |
-| `ambiguous` | 默认；同时覆盖意向、保守和少数复杂手术病例。 |
-| `review_required` | 使用确定性 QC 标记的全部复核病例。 |
-| `all` | 覆盖相关性规则纳入的全部患者。 |
+密钥只从当前进程的 `DEEPSEEK_API_KEY` 读取，不写进代码、请求包或报告。设置好环境变量后执行：
 
-上下文数量可以调整，但请求必须明确记录实际提供给模型的范围。证据已经全部纳入，不等于完整病历的每个 section 都已提供。
+```powershell
+python -X utf8 scripts/aaoca_management_llm.py run-agent `
+  --requests scratch/management_review_requests `
+  --output scratch/management_review_results
 
-## 5. 接入真实模型后的流程
+python -X utf8 scripts/aaoca_management_llm.py validate-agent `
+  --requests scratch/management_review_requests `
+  --output scratch/management_review_results
+```
 
-经过批准的 adapter 接入后，应按以下顺序执行：
+`validate-agent` 不带 `--output` 时只检查准备包。每次准备与执行均须使用新的输出目录，避免覆盖历史结果或意外重跑。
 
-1. 确认患者数据允许在哪个环境处理；
-2. 固定模型、prompt、采样、重试和上下文策略；
-3. 从当前正式 management 包重新准备请求；
-4. 保存模型版本与运行说明；
-5. 完整检查每个返回及其引用；
-6. 生成独立 sidecar；
-7. 对分歧和新发现证据进行人工复核；
-8. 在冻结的 management Gold Set 上评估后，再讨论是否改变正式策略。
+## 调用和检查边界
 
-不要通过修改请求编号或内部来源标记来“迁移”旧结果。只要上游规则、患者摘要、证据或上下文范围发生变化，就应重新准备和重新运行。
+通过 `langchain_deepseek.ChatDeepSeek` 使用官方地址和 `model="deepseek-flash"`，关闭 thinking 以控制本轮试测开销。默认每例最多两次模型请求：可以首轮直接作答，也可以首轮并行调用最多四个工具、第二轮结束。每批最多六次 HTTP 请求；工具往返的模型请求同样计入次数。可调低 `--max-model-calls-per-case` 和 `--max-total-calls`，不能突破上述上限。API 出错时停止整批；不自动重试，也不通过额外模型请求修复输出。
 
-## 6. 历史诊断试跑怎样解释
+不发送 `response_format`，不用 `with_structured_output`。先从回复末尾识别完整 JSON 对象，再交给 `JsonOutputParser`，随后进行本地字段与引用检查。截断 JSON 不会被自动补齐成成功结果。官方接口说明见 [DeepSeek Tool Calls](https://api-docs.deepseek.com/guides/tool_calls/) 与 [ChatDeepSeek 文档](https://docs.langchain.com/oss/python/integrations/chat/deepseek)。
 
-2026-09-29 曾有一次小规模诊断试跑：124 个准备请求中只收到 11 个返回，只有 1 个原样通过当时的检查，其余主要存在引用无效、引文不匹配或缺少人工复核标记等问题。
+模型只提交 `section_id` 与短连续引文，宿主在模型实际读到的原文窗口中定位字符偏移。未展示内容、其他患者的 section 和改写引文不能通过校验；只有空白差异且能唯一定位时允许回到精确源文字，同时保存模型引文、源引文与匹配方式。字词和标点差异不做模糊修复。准备包绑定当前规则、全部 section 来源、提示词和工具；来源变化后必须重新准备，旧结果不能换编号复用。
 
-这次试跑使用的是旧 management 和旧请求，不能用于当前正式包，也不能解释为模型准确率。旧实验目录已经移出正式输出；保留下来的价值只有一个结论：严格的来源引用和分歧检查是必要的。
+结果包括 `responses.jsonl`、`transcripts/*.json`、`review_summary.csv` 和调用/token 回执。每例结果都保留 `requires_human_review=true`；检查通过只表示工程结构、来源与引用一致，不表示临床结论正确。运行时禁用 LangSmith tracing，患者文本及 AGY 原始报告保留在 Git 忽略目录。
 
-## 7. 接入前仍需决定
+`actual_aaoca_surgery=no` 在本流程中需要直接否定既往手术史的引文。某一次操作“未处理”由 `aaoca_handling=explicitly_not_treated` 表达，不能单独推断患者整个已记录时间线从未手术；“未见完成记录”也不能证明明确未处理。宿主设置最低限度的直接引文门槛，不能代替临床语义复核。历史“术后”追记、肺动脉移位是否针对 AAOCA，以及其他处置目标，仍需要人工核实。这些候选不能直接改写正式手术事件。
 
-- 使用本地模型还是其他经过批准的服务；
-- 患者数据的隐私、网络和留存边界；
-- 具体模型、prompt、上下文限额、sampling、重试和成本策略；
-- 选择哪些病例进入模型审阅；
-- 一致、分歧和新证据各自怎样进入人工流程；
-- management Gold Set 的标注与冻结方案；其版本与评分设计可参考[现有页面级 Gold Set 规范](gold_set_evaluation.md)，但两者不能混用。
+## 本次诊断试测（2026-10-17）
 
-在这些决定完成前，不应把这个原型描述为已经产生真实患者 LLM 结论。
+当前队列的旧 `ambiguous` 路由为 126 例；v2 分为 141 例规则已解决、34 例缺少进一步可解释资料、55 例语义复核候选。实际仅选三例，覆盖同意书自填决策、复杂同台操作目标归属和后续门诊术后异写。
+
+首轮暴露出单次未处理被扩大为全局 `no`、原文换行造成引文失败的问题。收紧提示词和直接否定证据门槛，并加入唯一空白映射后，同三例第二轮均通过结构/引用/来源回放校验。模型找回了同意书保守决定，对冲突的术后追记保留未知；复杂肺动脉移位病例仍存在管理归属分歧，不能直接采用其预测。三例通过工程校验不表示三例临床正确。
+
+两轮共 12 次模型 HTTP 请求，输入 67,931、输出 2,956 tokens；工具往返包含在内，无开发期真实病例调用和自动重试。临床内容与逐例分析保存在 Git 忽略的本地诊断目录，正式规则状态未改动。
+
+## 历史 v1 接口
+
+原 `prepare`、`validate-requests`、`validate-responses`、`reconcile`、`validate-hybrid` 命令及 provider-neutral Python 接口保留，用于历史包和已有测试。它们的 schema 与 v2 不互换；v2 复核结果不能直接送入旧 `reconcile`。历史试跑和本次小样本诊断均不构成 management Gold Set，不据此报告准确率。
